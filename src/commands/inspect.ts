@@ -21,17 +21,17 @@ export async function inspectCommand(
   console.log(`App Version: ${manifest.app_version}`);
   console.log("");
 
-  const table = createTable(["Client", "Version", "Sessions", "Exported", "Secrets"]);
+  const table = createTable(["Client", "Version", "Mode", "Sessions", "Exported", "Privacy"]);
   for (const client of manifest.clients) {
     table.push([
       client.name,
       client.version,
+      client.export_mode ?? "sessions",
       String(client.session_count),
       String(client.exported_session_count),
-      client.include_secrets ? "included" : "excluded"
+      "excluded"
     ]);
   }
   console.log(table.toString());
   console.log(`Entries: ${entries.length}`);
 }
-

@@ -19,8 +19,8 @@ export interface Provider {
 }
 
 export interface ProviderCopyOptions {
-  includeSecrets: boolean;
   sessionIds?: string[];
+  full?: boolean;
 }
 
 export interface RestoreOptions {
@@ -35,7 +35,7 @@ export interface ProviderDefinition {
   versionCommand?: string;
   versionArgs?: string[];
   sessionRoots: string[];
-  configFiles: string[];
+  fullExcludeRoots?: string[];
 }
 
 export class FileProvider implements Provider {
@@ -106,7 +106,7 @@ export class FileProvider implements Provider {
     if (files.size === 0) {
       for (const file of await walkFiles(root)) {
         const relative = path.relative(root, file);
-        if (isSessionFile(file) && !isConfigLike(relative) && !isSecretPath(relative)) {
+        if (isSessionFile(file) && !isConfigLike(relative) && !isPrivacyExcludedPath(relative)) {
           files.add(file);
         }
       }
@@ -137,27 +137,21 @@ export class FileProvider implements Provider {
     await fs.ensureDir(rootTarget);
 
     if (!options.sessionIds?.length) {
-      await fs.copy(sourceRoot, rootTarget, {
-        filter: (source) => {
-          const relative = toPosix(path.relative(sourceRoot, source));
-          return relative === "" || options.includeSecrets || !isSecretPath(relative);
-        }
-      });
+      if (options.full) {
+        await copyFullProviderRoot(sourceRoot, rootTarget, this.definition.fullExcludeRoots ?? []);
+      } else {
+        await copySessionRoots(sourceRoot, rootTarget, this.definition.sessionRoots);
+      }
       return (await this.listSessions(env)).length;
     }
 
     const sessions = await this.listSessions(env);
     const selected = matchSessions(this.id, sessions, options.sessionIds);
 
-    for (const configFile of this.definition.configFiles) {
-      const source = path.join(sourceRoot, configFile);
-      if (await fs.pathExists(source)) {
-        await fs.copy(source, path.join(rootTarget, configFile));
-      }
-    }
-
     for (const session of selected) {
-      await fs.copy(session.absolutePath, path.join(rootTarget, session.relativePath));
+      if (!isPrivacyExcludedPath(session.relativePath, this.definition.fullExcludeRoots ?? [])) {
+        await fs.copy(session.absolutePath, path.join(rootTarget, session.relativePath));
+      }
     }
 
     return selected.length;
@@ -253,19 +247,70 @@ function isConfigLike(relativePath: string): boolean {
   return parts.length <= 1 || parts.includes("config");
 }
 
-function isSecretPath(relativePath: string): boolean {
+function isPrivacyExcludedPath(relativePath: string, extraRootExcludes: string[] = []): boolean {
   const lower = relativePath.toLowerCase();
   const base = path.basename(lower);
+  const parts = lower.split("/");
+  const firstPart = parts[0] ?? "";
+
   return (
+    relativePath === "" ||
+    extraRootExcludes.map((item) => item.toLowerCase()).includes(firstPart) ||
+    parts.includes(".git") ||
+    parts.includes("node_modules") ||
+    parts.includes("cache") ||
+    parts.includes("tmp") ||
+    parts.includes(".tmp") ||
+    parts.includes("logs") ||
+    parts.includes("plugins") ||
+    parts.includes("config") ||
+    base === "config.toml" ||
+    base === "config.json" ||
+    base === "settings.json" ||
+    base === "settings.local.json" ||
     base === ".env" ||
     base === "auth.json" ||
+    base === "credentials.json" ||
+    base === "credentials" ||
+    base === "token.json" ||
+    base === "tokens.json" ||
+    base === "session_key" ||
     base.includes("credential") ||
     base.includes("secret") ||
+    base.includes("token") ||
+    base.includes("apikey") ||
+    base.includes("api_key") ||
+    base.includes("oauth") ||
+    base.includes("auth") ||
     base.endsWith(".pem") ||
     base.endsWith(".key") ||
     base.endsWith(".p12") ||
     base.endsWith(".pfx")
   );
+}
+
+async function copySessionRoots(sourceRoot: string, rootTarget: string, sessionRoots: string[]): Promise<void> {
+  for (const sessionRoot of sessionRoots) {
+    const source = path.join(sourceRoot, sessionRoot);
+    if (!(await fs.pathExists(source))) {
+      continue;
+    }
+    await fs.copy(source, path.join(rootTarget, sessionRoot), {
+      filter: (candidate) => {
+        const relative = toPosix(path.relative(sourceRoot, candidate));
+        return relative === "" || !isPrivacyExcludedPath(relative);
+      }
+    });
+  }
+}
+
+async function copyFullProviderRoot(sourceRoot: string, rootTarget: string, extraRootExcludes: string[]): Promise<void> {
+  await fs.copy(sourceRoot, rootTarget, {
+    filter: (candidate) => {
+      const relative = toPosix(path.relative(sourceRoot, candidate));
+      return relative === "" || !isPrivacyExcludedPath(relative, extraRootExcludes);
+    }
+  });
 }
 
 function inferProject(relativePath: string): string {

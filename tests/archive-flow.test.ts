@@ -22,7 +22,8 @@ describe("archive flow", () => {
           root_dir: "/tmp/.codex",
           session_count: 1,
           exported_session_count: 1,
-          include_secrets: false
+          export_mode: "sessions",
+          privacy_exclusions: ["auth", "tokens", "credentials", "config"]
         }
       ]);
       await fs.writeJson(path.join(source, "manifest.json"), manifest);
@@ -38,4 +39,3 @@ describe("archive flow", () => {
     }
   });
 });
-

@@ -8,8 +8,7 @@ const provider = new FileProvider({
   id: "codex",
   name: "Codex CLI",
   rootName: ".codex",
-  sessionRoots: ["sessions"],
-  configFiles: ["config.toml"]
+  sessionRoots: ["sessions"]
 });
 
 describe("provider restore", () => {
@@ -53,4 +52,3 @@ describe("provider restore", () => {
     }
   });
 });
-

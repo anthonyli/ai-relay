@@ -32,7 +32,8 @@ export interface ExportedClient {
   root_dir: string;
   session_count: number;
   exported_session_count: number;
-  include_secrets: boolean;
+  export_mode: "sessions" | "full";
+  privacy_exclusions: string[];
 }
 
 export interface BackupManifest {
@@ -51,7 +52,7 @@ export interface ExportOptions {
   only?: ProviderId[];
   sessions?: string[];
   yes?: boolean;
-  includeSecrets?: boolean;
+  full?: boolean;
   json?: boolean;
 }
 

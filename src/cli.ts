@@ -54,7 +54,7 @@ export function createCli(): Command {
     .option("--only <client...>", "export only selected clients: claude, codex")
     .option("--session <session...>", "export selected sessions, e.g. claude:projects/foo/session.jsonl")
     .option("-y, --yes", "skip confirmations")
-    .option("--include-secrets", "include auth/credential-like files")
+    .option("--full", "export broader non-secret provider data instead of only session/history data")
     .option("--json", "print JSON output")
     .action((options) => run((ctx) => exportCommand(ctx, options))());
 

@@ -9,8 +9,7 @@ const provider = new FileProvider({
   id: "codex",
   name: "Codex CLI",
   rootName: ".codex",
-  sessionRoots: ["sessions"],
-  configFiles: ["config.toml"]
+  sessionRoots: ["sessions"]
 });
 
 describe("rollback snapshots", () => {
@@ -54,4 +53,3 @@ describe("rollback snapshots", () => {
     }
   });
 });
-

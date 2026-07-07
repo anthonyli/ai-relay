@@ -18,7 +18,7 @@ export async function exportCommand(
     only?: string[];
     session?: string[];
     yes?: boolean;
-    includeSecrets?: boolean;
+    full?: boolean;
     json?: boolean;
   }
 ): Promise<void> {
@@ -95,8 +95,8 @@ export async function exportCommand(
       const clientDir = path.join(stagingDir, "clients", provider.id);
       await fs.ensureDir(clientDir);
       const exportedSessionCount = await provider.copyForExport(context.env, clientDir, {
-        includeSecrets: Boolean(options.includeSecrets),
-        sessionIds: options.session
+        sessionIds: options.session,
+        full: Boolean(options.full)
       });
       const status = await provider.status(context.env);
       clients.push({
@@ -106,7 +106,20 @@ export async function exportCommand(
         root_dir: status.rootDir,
         session_count: status.sessionCount,
         exported_session_count: exportedSessionCount,
-        include_secrets: Boolean(options.includeSecrets)
+        export_mode: options.full ? "full" : "sessions",
+        privacy_exclusions: [
+          "auth",
+          "tokens",
+          "credentials",
+          "secrets",
+          "config",
+          "settings",
+          "cache",
+          "tmp",
+          "logs",
+          "plugins",
+          "key material"
+        ]
       });
     }
 
@@ -135,8 +148,9 @@ export async function exportCommand(
     }
 
     success(`Backup created: ${output}`);
-    if (!options.includeSecrets) {
-      warn("Secret-like files were excluded. Use --include-secrets only for private backups.");
+    warn("Privacy-sensitive files are always excluded from backups.");
+    if (!options.full) {
+      warn("Default export includes session/history data only. Use --full for a broader non-secret provider backup.");
     }
   } finally {
     await fs.remove(stagingDir);

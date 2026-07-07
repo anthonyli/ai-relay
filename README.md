@@ -66,7 +66,13 @@ airelay backup
 airelay restore backup.zip
 ```
 
-By default, obvious secret files such as `auth.json`, credentials, `.env`, `.pem`, and `.key` are excluded. Use `--include-secrets` only for private backups you fully control.
+By default, export includes only session/history data. Privacy-sensitive files such as `auth.json`, tokens, credentials, config files, `.env`, `.pem`, `.key`, cache, tmp, logs, and plugins are always excluded.
+
+Use `--full` only when you want a broader provider backup. Even in full mode, privacy-sensitive files are still excluded:
+
+```bash
+airelay export --full
+```
 
 Import is non-destructive by default: existing files in `.claude` or `.codex` are kept. Use `--overwrite` only when you intentionally want the backup to replace local files with the same path.
 

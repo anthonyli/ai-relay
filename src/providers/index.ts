@@ -9,7 +9,7 @@ export const providers: Provider[] = [
     versionCommand: "claude",
     versionArgs: ["--version"],
     sessionRoots: ["projects", "sessions", "conversations"],
-    configFiles: ["settings.json", "settings.local.json"]
+    fullExcludeRoots: [".tmp", "tmp", "cache", "logs", "plugins"]
   }),
   new FileProvider({
     id: "codex",
@@ -17,8 +17,7 @@ export const providers: Provider[] = [
     rootName: ".codex",
     versionCommand: "codex",
     versionArgs: ["--version"],
-    sessionRoots: ["sessions"],
-    configFiles: ["config.toml"]
+    sessionRoots: ["sessions", "history"],
+    fullExcludeRoots: [".tmp", "tmp", "cache", "logs", "plugins"]
   })
 ];
-
