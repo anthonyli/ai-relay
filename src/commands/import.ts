@@ -3,6 +3,7 @@ import path from "node:path";
 import fs from "fs-extra";
 import * as p from "@clack/prompts";
 import { extractZip, readZipText } from "../archive/zip.js";
+import { syncCodexAppProjects } from "../codex-app.js";
 import { t } from "../i18n.js";
 import { parseManifest } from "../manifest.js";
 import { printJson, success, warn } from "../output.js";
@@ -119,6 +120,7 @@ export async function importCommand(
     await extractZip(backupFile, extractDir);
     spinner?.message(t("import.restoringClients"));
     const restored: string[] = [];
+    let codexAppProjectCount = 0;
 
     for (const provider of finalProviders) {
       const sourceRoot = path.join(extractDir, "clients", provider.id);
@@ -130,17 +132,24 @@ export async function importCommand(
         mapPaths,
         overwrite
       });
+      if (provider.id === "codex") {
+        codexAppProjectCount = await syncCodexAppProjects(context.env);
+      }
       restored.push(provider.id);
     }
 
     spinner?.stop(t("import.restoreComplete"));
 
     if (options.json) {
-      printJson({ restored, manifest, rollback });
+      printJson({ restored, manifest, rollback, codexAppProjectCount });
       return;
     }
 
     success(t("import.restored", { clients: restored.join(", ") }));
+    if (codexAppProjectCount > 0) {
+      success(t("import.codexAppProjects", { count: String(codexAppProjectCount) }));
+      warn(t("import.codexAppRestart"));
+    }
     success(t("import.rollbackSnapshot", { id: rollback.id }));
     if (!overwrite) {
       warn(t("import.keepExisting"));
