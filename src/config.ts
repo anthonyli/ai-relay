@@ -12,7 +12,13 @@ const ConfigSchema = z
         type: z.string().default("local"),
         bucket: z.string().optional(),
         region: z.string().optional(),
-        endpoint: z.string().optional()
+        endpoint: z.string().optional(),
+        key: z.string().optional(),
+        prefix: z.string().optional(),
+        access_key_id: z.string().optional(),
+        secret_access_key: z.string().optional(),
+        session_token: z.string().optional(),
+        force_path_style: z.boolean().optional()
       })
       .default({ type: "local" }),
     cloud_sync: z
@@ -28,6 +34,10 @@ const ConfigSchema = z
   });
 
 export type AppConfig = z.infer<typeof ConfigSchema>;
+
+export async function ensureUserConfigDir(env: RuntimeEnv): Promise<void> {
+  await fs.ensureDir(path.join(env.homeDir, ".airelay"));
+}
 
 export async function loadConfig(env: RuntimeEnv, explicitPath?: string): Promise<AppConfig> {
   const configPath = explicitPath ? path.resolve(explicitPath) : await findConfig(env);
@@ -55,15 +65,9 @@ async function findConfig(env: RuntimeEnv): Promise<string | undefined> {
     path.join(env.cwd, "airelay.config.yml"),
     path.join(env.cwd, "airelay.config.yaml"),
     path.join(env.cwd, "airelay.config.json"),
-    path.join(env.cwd, "aisession.config.yml"),
-    path.join(env.cwd, "aisession.config.yaml"),
-    path.join(env.cwd, "aisession.config.json"),
     path.join(env.homeDir, ".airelay", "config.yml"),
     path.join(env.homeDir, ".airelay", "config.yaml"),
-    path.join(env.homeDir, ".airelay", "config.json"),
-    path.join(env.homeDir, ".aisession", "config.yml"),
-    path.join(env.homeDir, ".aisession", "config.yaml"),
-    path.join(env.homeDir, ".aisession", "config.json")
+    path.join(env.homeDir, ".airelay", "config.json")
   ];
 
   for (const candidate of candidates) {

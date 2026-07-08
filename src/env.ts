@@ -4,7 +4,7 @@ import type { RuntimeEnv } from "./types.js";
 
 export function createRuntimeEnv(options: { home?: string } = {}): RuntimeEnv {
   return {
-    homeDir: path.resolve(options.home ?? process.env.AIRELAY_HOME ?? process.env.AISESSION_HOME ?? os.homedir()),
+    homeDir: path.resolve(options.home ?? process.env.AIRELAY_HOME ?? os.homedir()),
     cwd: process.cwd()
   };
 }

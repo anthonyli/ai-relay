@@ -1,5 +1,6 @@
 import os from "node:os";
 import path from "node:path";
+import crypto from "node:crypto";
 import fs from "fs-extra";
 import * as p from "@clack/prompts";
 import { createZipFromDirectory } from "../archive/zip.js";
@@ -150,9 +151,10 @@ export async function exportCommand(
   }
 }
 
-function defaultBackupName(): string {
-  const date = new Date().toISOString().slice(0, 10);
-  return `backup_${date}.zip`;
+export function defaultBackupName(date = new Date()): string {
+  const stamp = date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "");
+  const millis = String(date.getUTCMilliseconds()).padStart(3, "0");
+  return `backup_${stamp}_${millis}_${crypto.randomBytes(4).toString("hex")}.zip`;
 }
 
 function inferSessionProviderIds(sessions: string[] | undefined): ProviderId[] | undefined {

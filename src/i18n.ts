@@ -77,7 +77,8 @@ const translations = {
 
     "sync.requiresStorage": "airelay {action} requires V2 Storage configuration.",
     "sync.storageHint": "Default mode is V1.1 local-only. Use export/import for now, or configure cloud_sync.enabled=true with a non-local storage type.",
-    "sync.notImplemented": "V2 {action} is configured but not implemented in this build."
+    "sync.pushed": "Uploaded backup to {target}",
+    "sync.pulled": "Downloaded and restored backup from {source}"
   },
   zh: {
     "doctor.client": "客户端",
@@ -153,7 +154,8 @@ const translations = {
 
     "sync.requiresStorage": "airelay {action} 需要 V2 存储配置。",
     "sync.storageHint": "当前默认使用本地 V1.1 模式。现在可使用 export/import，或配置 cloud_sync.enabled=true 和非本地存储类型。",
-    "sync.notImplemented": "V2 {action} 已配置，但当前构建尚未实现。"
+    "sync.pushed": "已上传备份到 {target}",
+    "sync.pulled": "已下载并恢复备份：{source}"
   }
 } as const;
 

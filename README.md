@@ -101,6 +101,17 @@ airelay sync
 
 ## Config
 
+`airelay` loads config from the current directory first, then from the user config directory:
+
+- `./airelay.config.yml`
+- `./airelay.config.yaml`
+- `./airelay.config.json`
+- `~/.airelay/config.yml`
+- `~/.airelay/config.yaml`
+- `~/.airelay/config.json`
+
+Use `airelay --config /path/to/config.yml ...` to load a specific config file.
+
 Config is optional. Empty config is equivalent to:
 
 ```yaml
@@ -109,4 +120,33 @@ storage:
   type: local
 cloud_sync:
   enabled: false
+```
+
+Minimal MinIO/S3-compatible config:
+
+```yaml
+version: "2"
+storage:
+  type: s3
+  bucket: airelay
+  region: us-east-1
+  endpoint: http://127.0.0.1:9000
+  prefix: backups
+  access_key_id: minioadmin
+  secret_access_key: minioadmin
+  force_path_style: true
+cloud_sync:
+  enabled: true
+```
+
+Upload an existing backup zip:
+
+```bash
+airelay push backup_2026-07-08.zip
+```
+
+Download and restore that backup:
+
+```bash
+airelay pull backup_2026-07-08.zip
 ```

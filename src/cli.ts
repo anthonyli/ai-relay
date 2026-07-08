@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import { loadConfig } from "./config.js";
+import { ensureUserConfigDir, loadConfig } from "./config.js";
 import { createRuntimeEnv } from "./env.js";
 import { APP_VERSION } from "./manifest.js";
 import { error } from "./output.js";
@@ -9,7 +9,7 @@ import { importCommand } from "./commands/import.js";
 import { inspectCommand } from "./commands/inspect.js";
 import { listCommand } from "./commands/list.js";
 import { rollbackCommand } from "./commands/rollback.js";
-import { syncPlaceholderCommand } from "./commands/sync.js";
+import { syncCommand } from "./commands/sync.js";
 import type { CommandContext } from "./commands/context.js";
 
 export function createCli(): Command {
@@ -25,6 +25,7 @@ export function createCli(): Command {
   async function context(): Promise<CommandContext> {
     const options = program.optsWithGlobals() as { config?: string; home?: string };
     const env = createRuntimeEnv({ home: options.home });
+    await ensureUserConfigDir(env);
     const config = await loadConfig(env, options.config);
     return { env, config, configPath: options.config };
   }
@@ -97,7 +98,8 @@ export function createCli(): Command {
     program
       .command(action)
       .description(`V2 cloud ${action} (requires explicit storage config).`)
-      .action(() => run((ctx) => syncPlaceholderCommand(ctx, action))());
+      .argument("[backup]", "backup zip file name or remote object key")
+      .action((backup) => run((ctx) => syncCommand(ctx, action, { backup }))());
   }
 
   return program;
