@@ -122,7 +122,7 @@ Hierarchy:
 2. Headline: short outcome-focused line
 3. Terminal command block
 4. 3 to 5 feature badges
-5. CTA: `npm install && airelay export`
+5. CTA: `npm install -g ai-relay-cli && airelay export`
 
 Primary poster structure:
 
@@ -198,7 +198,7 @@ Codex CLI
 CTA:
 
 ```text
-npm install
+npm install -g ai-relay-cli
 airelay export
 ```
 
@@ -244,7 +244,7 @@ Cross-device migration
 CTA:
 
 ```text
-npm install
+npm install -g ai-relay-cli
 airelay export
 ```
 
@@ -290,7 +290,7 @@ Cross-device migration
 CTA:
 
 ```text
-npm install
+npm install -g ai-relay-cli
 airelay export
 ```
 
@@ -336,7 +336,7 @@ Cross-device migration
 CTA:
 
 ```text
-npm install
+npm install -g ai-relay-cli
 airelay export
 ```
 
@@ -368,7 +368,7 @@ AI Relay
 Carry your AI coding sessions safely to the next machine
 
 CTA:
-npm install
+npm install -g ai-relay-cli
 airelay export
 ```
 
@@ -395,7 +395,7 @@ AI Relay
 本地优先，默认排除敏感文件，导入前自动创建回滚快照。
 
 CTA：
-npm install
+npm install -g ai-relay-cli
 airelay export
 ```
 

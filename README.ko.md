@@ -2,6 +2,8 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md) | [한국어](README.ko.md)
 
+![AI Relay poster](img-en.png)
+
 `airelay`는 로컬 AI Coding CLI 세션을 백업, 복원, 확인, 이전하기 위한 도구입니다.
 
 현재 기본 모드는 V1.1 local-first 입니다.
@@ -30,7 +32,26 @@ airelay rollback
 
 기본 내보내기는 session/history 데이터만 포함합니다. `auth.json`, 토큰, 인증 정보, 설정 파일, `.env`, `.pem`, `.key`, cache, tmp, logs, plugins 같은 민감한 파일은 제외됩니다.
 
-## 로컬 설치
+## npm에서 설치
+
+게시된 npm 패키지를 설치합니다.
+
+```bash
+npm install -g ai-relay-cli
+```
+
+실행 예:
+
+```bash
+airelay doctor
+airelay export
+airelay inspect backup_2026-07-07.zip
+airelay import backup_2026-07-07.zip
+```
+
+## 로컬 빌드
+
+로컬 개발용:
 
 ```bash
 npm install
@@ -38,7 +59,7 @@ npm run build
 npm link
 ```
 
-실행 예:
+link 후 명령을 실행합니다.
 
 ```bash
 airelay doctor

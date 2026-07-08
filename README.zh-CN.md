@@ -2,6 +2,8 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md) | [한국어](README.ko.md)
 
+![AI Relay 海报](img.png)
+
 `airelay` 用于备份、恢复、检查和迁移本地 AI Coding CLI 会话。
 
 当前默认模式是 V1.1 本地优先：
@@ -30,7 +32,26 @@ airelay rollback
 
 默认导出只包含 session/history 数据。`auth.json`、token、凭证、配置文件、`.env`、`.pem`、`.key`、cache、tmp、logs、plugins 等隐私敏感文件会被排除。
 
-## 本地安装
+## 从 npm 安装
+
+安装已发布的 npm 包：
+
+```bash
+npm install -g ai-relay-cli
+```
+
+然后运行：
+
+```bash
+airelay doctor
+airelay export
+airelay inspect backup_2026-07-07.zip
+airelay import backup_2026-07-07.zip
+```
+
+## 本地构建
+
+用于本地开发：
 
 ```bash
 npm install
@@ -38,7 +59,7 @@ npm run build
 npm link
 ```
 
-然后运行：
+然后运行 link 后的命令：
 
 ```bash
 airelay doctor

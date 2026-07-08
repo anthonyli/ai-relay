@@ -2,6 +2,8 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md) | [한국어](README.ko.md)
 
+![AI Relay poster](img-en.png)
+
 `airelay` backs up, restores, inspects, and migrates local AI coding CLI sessions.
 
 Current default mode is V1.1 local-first:
@@ -30,7 +32,26 @@ airelay rollback
 
 By default, exports include session and history data only. Privacy-sensitive files such as `auth.json`, tokens, credentials, config files, `.env`, `.pem`, `.key`, cache, tmp, logs, and plugins are excluded.
 
-## Install locally
+## Install from npm
+
+Install the published package:
+
+```bash
+npm install -g ai-relay-cli
+```
+
+Then:
+
+```bash
+airelay doctor
+airelay export
+airelay inspect backup_2026-07-07.zip
+airelay import backup_2026-07-07.zip
+```
+
+## Build locally
+
+For local development:
 
 ```bash
 npm install
@@ -38,7 +59,7 @@ npm run build
 npm link
 ```
 
-Then:
+Then run the linked binary:
 
 ```bash
 airelay doctor
