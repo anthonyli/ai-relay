@@ -1,4 +1,5 @@
 import { isCloudSyncConfigured } from "../config.js";
+import { t } from "../i18n.js";
 import { createTable, printJson, success, warn } from "../output.js";
 import { providers } from "../providers/index.js";
 import type { CommandContext } from "./context.js";
@@ -18,11 +19,11 @@ export async function doctorCommand(context: CommandContext, options: { json?: b
     return;
   }
 
-  const table = createTable(["Client", "Status", "Version", "Sessions", "Path"]);
+  const table = createTable([t("doctor.client"), t("doctor.status"), t("doctor.version"), t("doctor.sessions"), t("doctor.path")]);
   for (const status of statuses) {
     table.push([
       status.name,
-      status.detected ? "Detected" : "Not found",
+      status.detected ? t("doctor.detected") : t("doctor.notFound"),
       status.version,
       String(status.sessionCount),
       status.rootDir
@@ -32,9 +33,8 @@ export async function doctorCommand(context: CommandContext, options: { json?: b
   console.log(table.toString());
 
   if (isCloudSyncConfigured(context.config)) {
-    success(`V2 Storage configured: ${context.config.storage.type}`);
+    success(t("doctor.storageConfigured", { storage: context.config.storage.type }));
   } else {
-    warn("V2 Storage: Not configured. Default mode is local V1.1.");
+    warn(t("doctor.storageNotConfigured"));
   }
 }
-

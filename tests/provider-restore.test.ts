@@ -51,4 +51,33 @@ describe("provider restore", () => {
       await fs.remove(dir);
     }
   });
+
+  it("rewrites mapped project paths in both content and encoded path names", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "airelay-restore-"));
+    const home = path.join(dir, "home");
+    const backup = path.join(dir, "backup-client");
+    const claudeProvider = new FileProvider({
+      id: "claude",
+      name: "Claude Code",
+      rootName: ".claude",
+      sessionRoots: ["projects"]
+    });
+
+    try {
+      const sourceSession = path.join(backup, "root", "projects", "-Users-alice-work-app", "session.jsonl");
+      await fs.ensureDir(path.dirname(sourceSession));
+      await fs.writeFile(sourceSession, JSON.stringify({ cwd: "/Users/alice/work/app" }) + "\n");
+
+      await claudeProvider.restoreFromBackup({ homeDir: home, cwd: dir }, backup, {
+        mapPaths: [{ from: "/Users/alice/work", to: "/Users/bob/dev" }]
+      });
+
+      const restoredSession = path.join(home, ".claude", "projects", "-Users-bob-dev-app", "session.jsonl");
+      expect(await fs.pathExists(restoredSession)).toBe(true);
+      expect(await fs.readFile(restoredSession, "utf8")).toContain("/Users/bob/dev/app");
+      expect(await fs.pathExists(path.join(home, ".claude", "projects", "-Users-alice-work-app", "session.jsonl"))).toBe(false);
+    } finally {
+      await fs.remove(dir);
+    }
+  });
 });

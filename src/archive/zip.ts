@@ -7,19 +7,40 @@ import yauzl from "yauzl";
 
 export async function createZipFromDirectory(sourceDir: string, outputFile: string): Promise<void> {
   await fs.ensureDir(path.dirname(outputFile));
+  const temporaryOutput = path.join(path.dirname(outputFile), `.${path.basename(outputFile)}.${process.pid}.${Date.now()}.tmp`);
 
-  await new Promise<void>((resolve, reject) => {
-    const output = createWriteStream(outputFile);
-    const archive = archiver("zip", { zlib: { level: 9 } });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const output = createWriteStream(temporaryOutput);
+      const archive = archiver("zip", { zlib: { level: 9 } });
+      let settled = false;
 
-    output.on("close", () => resolve());
-    output.on("error", reject);
-    archive.on("error", reject);
+      const fail = (error: Error) => {
+        if (!settled) {
+          settled = true;
+          reject(error);
+        }
+      };
 
-    archive.pipe(output);
-    archive.directory(sourceDir, false);
-    void archive.finalize();
-  });
+      output.on("close", () => {
+        if (!settled) {
+          settled = true;
+          resolve();
+        }
+      });
+      output.on("error", fail);
+      archive.on("error", fail);
+      archive.on("warning", fail);
+
+      archive.pipe(output);
+      archive.directory(sourceDir, false);
+      void archive.finalize();
+    });
+    await fs.move(temporaryOutput, outputFile, { overwrite: true });
+  } catch (error) {
+    await fs.remove(temporaryOutput);
+    throw error;
+  }
 }
 
 export async function extractZip(zipFile: string, destinationDir: string): Promise<void> {
@@ -55,6 +76,20 @@ export async function extractZip(zipFile: string, destinationDir: string): Promi
 export async function readZipText(zipFile: string, fileName: string): Promise<string> {
   const zip = await openZip(zipFile);
   return new Promise<string>((resolve, reject) => {
+    let settled = false;
+    const finish = (error?: Error, value?: string) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      zip.close();
+      if (error) {
+        reject(error);
+      } else {
+        resolve(value ?? "");
+      }
+    };
+
     zip.readEntry();
     zip.on("entry", (entry) => {
       if (entry.fileName !== fileName) {
@@ -67,15 +102,15 @@ export async function readZipText(zipFile: string, fileName: string): Promise<st
           const stream = await openReadStream(zip, entry);
           const chunks: Buffer[] = [];
           stream.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
-          stream.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
-          stream.on("error", reject);
+          stream.on("end", () => finish(undefined, Buffer.concat(chunks).toString("utf8")));
+          stream.on("error", finish);
         } catch (error) {
-          reject(error);
+          finish(error instanceof Error ? error : new Error(String(error)));
         }
       })();
     });
-    zip.on("end", () => reject(new Error(`${fileName} not found in backup.`)));
-    zip.on("error", reject);
+    zip.on("end", () => finish(new Error(`${fileName} not found in backup.`)));
+    zip.on("error", finish);
   });
 }
 
@@ -129,4 +164,3 @@ function safeJoin(root: string, entryName: string): string {
   }
   return targetPath;
 }
-

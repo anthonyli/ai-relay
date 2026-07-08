@@ -17,7 +17,7 @@ export interface RollbackManifest {
   version: 1;
   id: string;
   created_at: string;
-  reason: "pre-import";
+  reason: "pre-import" | "pre-rollback";
   source_backup: string;
   clients: RollbackClient[];
 }
@@ -39,7 +39,25 @@ export async function createPreImportRollback(
   providers: Provider[],
   sourceBackup: string
 ): Promise<RollbackEntry> {
-  const id = `pre_import_${timestampForFile(new Date())}`;
+  return createRollbackSnapshot(env, providers, sourceBackup, "pre_import", "pre-import");
+}
+
+async function createPreRollbackRollback(
+  env: RuntimeEnv,
+  providers: Provider[],
+  sourceBackup: string
+): Promise<RollbackEntry> {
+  return createRollbackSnapshot(env, providers, sourceBackup, "pre_rollback", "pre-rollback");
+}
+
+async function createRollbackSnapshot(
+  env: RuntimeEnv,
+  providers: Provider[],
+  sourceBackup: string,
+  prefix: "pre_import" | "pre_rollback",
+  reason: RollbackManifest["reason"]
+): Promise<RollbackEntry> {
+  const id = await nextRollbackId(env, prefix);
   const stagingDir = path.join(env.homeDir, ".airelay", "tmp", id);
   const outputFile = path.join(rollbackDir(env), `${id}.zip`);
   const clients: RollbackClient[] = [];
@@ -59,7 +77,9 @@ export async function createPreImportRollback(
       });
 
       if (existed) {
-        await fs.copy(root, path.join(stagingDir, "clients", provider.id, "root"));
+        await fs.copy(root, path.join(stagingDir, "clients", provider.id, "root"), {
+          filter: isRollbackCopyablePath
+        });
       }
     }
 
@@ -69,7 +89,7 @@ export async function createPreImportRollback(
       version: 1,
       id,
       created_at: new Date().toISOString(),
-      reason: "pre-import",
+      reason,
       source_backup: path.resolve(sourceBackup),
       clients
     };
@@ -120,6 +140,7 @@ export async function listRollbacks(env: RuntimeEnv): Promise<RollbackEntry[]> {
 
 export async function restoreRollback(env: RuntimeEnv, providers: Provider[], rollbackFileOrId: string): Promise<RollbackEntry> {
   const entry = await resolveRollback(env, rollbackFileOrId);
+  await createPreRollbackRollback(env, providers, entry.file);
   const extractDir = path.join(env.homeDir, ".airelay", "tmp", `restore_${entry.id}`);
   await fs.remove(extractDir);
   await fs.ensureDir(extractDir);
@@ -131,18 +152,12 @@ export async function restoreRollback(env: RuntimeEnv, providers: Provider[], ro
     for (const client of manifest.clients) {
       const provider = providers.find((candidate) => candidate.id === client.type);
       if (!provider) {
-        continue;
+        throw new Error(`Unsupported provider in rollback snapshot: ${client.type}`);
       }
 
       const targetRoot = provider.rootDir(env);
-      await fs.remove(targetRoot);
-
-      if (client.existed) {
-        const sourceRoot = path.join(extractDir, "clients", client.type, "root");
-        if (await fs.pathExists(sourceRoot)) {
-          await fs.copy(sourceRoot, targetRoot, { overwrite: true, errorOnExist: false });
-        }
-      }
+      const sourceRoot = path.join(extractDir, "clients", client.type, "root");
+      await replaceProviderRoot(targetRoot, client.existed ? sourceRoot : undefined);
     }
 
     return entry;
@@ -165,7 +180,11 @@ async function resolveRollback(env: RuntimeEnv, fileOrId: string): Promise<Rollb
   }
 
   const entries = await listRollbacks(env);
-  const entry = entries.find((candidate) => candidate.id === fileOrId || candidate.id.includes(fileOrId));
+  const matches = entries.filter((candidate) => candidate.id === fileOrId || candidate.id.includes(fileOrId));
+  if (matches.length > 1) {
+    throw new Error(`Rollback "${fileOrId}" is ambiguous. Use the full rollback id.`);
+  }
+  const entry = matches[0];
   if (!entry) {
     throw new Error(`Rollback "${fileOrId}" not found.`);
   }
@@ -185,5 +204,50 @@ function isSupportedApp(app: string): app is RollbackManifest["app"] {
 }
 
 function timestampForFile(date: Date): string {
-  return date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+  return date.toISOString().replace(/[-:]/g, "").replace(".", "");
+}
+
+async function nextRollbackId(env: RuntimeEnv, prefix: "pre_import" | "pre_rollback"): Promise<string> {
+  const base = `${prefix}_${timestampForFile(new Date())}`;
+  let id = base;
+  let attempt = 1;
+  while (await fs.pathExists(path.join(rollbackDir(env), `${id}.zip`))) {
+    id = `${base}_${attempt}`;
+    attempt += 1;
+  }
+  return id;
+}
+
+async function replaceProviderRoot(targetRoot: string, sourceRoot: string | undefined): Promise<void> {
+  const parent = path.dirname(targetRoot);
+  const base = path.basename(targetRoot);
+  const token = `${process.pid}_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const nextRoot = path.join(parent, `.${base}.next_${token}`);
+  const oldRoot = path.join(parent, `.${base}.old_${token}`);
+
+  await fs.ensureDir(parent);
+  if (sourceRoot && (await fs.pathExists(sourceRoot))) {
+    await fs.copy(sourceRoot, nextRoot, { overwrite: true, errorOnExist: false });
+  }
+
+  try {
+    if (await fs.pathExists(targetRoot)) {
+      await fs.move(targetRoot, oldRoot, { overwrite: false });
+    }
+    if (await fs.pathExists(nextRoot)) {
+      await fs.move(nextRoot, targetRoot, { overwrite: false });
+    }
+    await fs.remove(oldRoot);
+  } catch (error) {
+    if (!(await fs.pathExists(targetRoot)) && (await fs.pathExists(oldRoot))) {
+      await fs.move(oldRoot, targetRoot, { overwrite: false });
+    }
+    await fs.remove(nextRoot);
+    throw error;
+  }
+}
+
+async function isRollbackCopyablePath(source: string): Promise<boolean> {
+  const stat = await fs.lstat(source);
+  return stat.isDirectory() || stat.isFile() || stat.isSymbolicLink();
 }

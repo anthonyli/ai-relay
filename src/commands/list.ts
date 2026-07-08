@@ -1,3 +1,4 @@
+import { t } from "../i18n.js";
 import { createTable, formatDate, printJson, warn } from "../output.js";
 import { providers } from "../providers/index.js";
 import type { CommandContext } from "./context.js";
@@ -15,11 +16,11 @@ export async function listCommand(
   }
 
   if (sessions.length === 0) {
-    warn("No sessions found. Run `airelay doctor` to check provider detection.");
+    warn(t("list.noSessions"));
     return;
   }
 
-  const table = createTable(["Client", "Project", "Updated", "Size", "Session"]);
+  const table = createTable([t("list.client"), t("list.project"), t("list.updated"), t("list.size"), t("list.session")]);
   for (const session of sessions) {
     table.push([
       session.provider,

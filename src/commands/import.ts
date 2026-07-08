@@ -3,6 +3,7 @@ import path from "node:path";
 import fs from "fs-extra";
 import * as p from "@clack/prompts";
 import { extractZip, readZipText } from "../archive/zip.js";
+import { t } from "../i18n.js";
 import { parseManifest } from "../manifest.js";
 import { printJson, success, warn } from "../output.js";
 import { providers } from "../providers/index.js";
@@ -30,7 +31,7 @@ export async function importCommand(
   const selectedProviders = providers.filter((provider) => idsToRestore.includes(provider.id));
 
   if (selectedProviders.length === 0) {
-    throw new Error("No matching supported clients found in backup.");
+    throw new Error(t("import.noMatchingClients"));
   }
 
   const interactive = isInteractive(options);
@@ -39,9 +40,9 @@ export async function importCommand(
   let mapPaths = parsePathMappings(options.mapPath);
 
   if (interactive && !selectedIds?.length) {
-    p.intro("AI Relay Import");
+    p.intro(t("import.intro"));
     const answer = await p.multiselect({
-      message: "Select clients to restore",
+      message: t("import.selectClients"),
       options: selectedProviders.map((provider) => ({
         value: provider.id,
         label: provider.name,
@@ -51,7 +52,7 @@ export async function importCommand(
       required: true
     });
     if (p.isCancel(answer)) {
-      p.cancel("Import cancelled.");
+      p.cancel(t("import.cancelled"));
       return;
     }
     const selected = answer as ProviderId[];
@@ -60,11 +61,11 @@ export async function importCommand(
 
   if (interactive && options.overwrite === undefined) {
     const overwriteAnswer = await p.confirm({
-      message: "Overwrite files that already exist on this machine?",
+      message: t("import.overwrite"),
       initialValue: false
     });
     if (p.isCancel(overwriteAnswer)) {
-      p.cancel("Import cancelled.");
+      p.cancel(t("import.cancelled"));
       return;
     }
     overwrite = Boolean(overwriteAnswer);
@@ -72,21 +73,21 @@ export async function importCommand(
 
   if (interactive && !options.mapPath?.length) {
     const shouldMap = await p.confirm({
-      message: "Do you need to rewrite project paths for this machine?",
+      message: t("import.mapQuestion"),
       initialValue: false
     });
     if (p.isCancel(shouldMap)) {
-      p.cancel("Import cancelled.");
+      p.cancel(t("import.cancelled"));
       return;
     }
 
     if (shouldMap) {
       const mapping = await p.text({
-        message: "Path mapping",
+        message: t("import.pathMapping"),
         placeholder: "/Users/alice/work=/Users/bob/dev"
       });
       if (p.isCancel(mapping)) {
-        p.cancel("Import cancelled.");
+        p.cancel(t("import.cancelled"));
         return;
       }
       mapPaths = parsePathMappings([String(mapping)]);
@@ -95,32 +96,34 @@ export async function importCommand(
 
   if (interactive && !options.yes) {
     const confirm = await p.confirm({
-      message: overwrite
-        ? "Restore sessions/config into local provider directories? Existing files may be overwritten."
-        : "Restore sessions/config into local provider directories? Existing files will be kept by default.",
+      message: overwrite ? t("import.confirmOverwrite") : t("import.confirm"),
       initialValue: false
     });
     if (p.isCancel(confirm) || !confirm) {
-      p.cancel("Import cancelled.");
+      p.cancel(t("import.cancelled"));
       return;
     }
   }
 
+  if (!interactive && !options.yes) {
+    throw new Error(t("import.nonInteractiveYes"));
+  }
+
   const spinner = interactive ? p.spinner() : undefined;
-  spinner?.start("Creating rollback snapshot...");
+  spinner?.start(t("import.creatingRollback"));
   const extractDir = await fs.mkdtemp(path.join(os.tmpdir(), "airelay-import-"));
 
   try {
     const rollback = await createPreImportRollback(context.env, finalProviders, backupFile);
-    spinner?.message("Reading backup...");
+    spinner?.message(t("import.readingBackup"));
     await extractZip(backupFile, extractDir);
-    spinner?.message("Restoring clients...");
+    spinner?.message(t("import.restoringClients"));
     const restored: string[] = [];
 
     for (const provider of finalProviders) {
       const sourceRoot = path.join(extractDir, "clients", provider.id);
       if (!(await fs.pathExists(sourceRoot))) {
-        warn(`${provider.name} not found in backup. Skipping.`);
+        warn(t("import.clientMissing", { client: provider.name }));
         continue;
       }
       await provider.restoreFromBackup(context.env, sourceRoot, {
@@ -130,20 +133,20 @@ export async function importCommand(
       restored.push(provider.id);
     }
 
-    spinner?.stop("Restore complete.");
+    spinner?.stop(t("import.restoreComplete"));
 
     if (options.json) {
       printJson({ restored, manifest, rollback });
       return;
     }
 
-    success(`Restored: ${restored.join(", ")}`);
-    success(`Rollback snapshot: ${rollback.id}`);
+    success(t("import.restored", { clients: restored.join(", ") }));
+    success(t("import.rollbackSnapshot", { id: rollback.id }));
     if (!overwrite) {
-      warn("Existing files were kept. Use --overwrite only when you intentionally want backup files to replace local files.");
+      warn(t("import.keepExisting"));
     }
     if (mapPaths.length === 0) {
-      warn("If project paths changed between machines, re-run import with --map-path old=new.");
+      warn(t("import.mapHint"));
     }
   } finally {
     await fs.remove(extractDir);

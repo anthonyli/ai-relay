@@ -1,4 +1,5 @@
 import * as p from "@clack/prompts";
+import { t } from "../i18n.js";
 import { createTable, formatDate, printJson, success, warn } from "../output.js";
 import { providers } from "../providers/index.js";
 import { listRollbacks, restoreRollback } from "../rollback.js";
@@ -22,7 +23,7 @@ export async function rollbackCommand(
   }
 
   if (entries.length === 0) {
-    warn("No rollback snapshots found.");
+    warn(t("rollback.noSnapshots"));
     return;
   }
 
@@ -30,9 +31,9 @@ export async function rollbackCommand(
   let selectedId = rollbackId;
 
   if (!selectedId && interactive) {
-    p.intro("AI Relay Rollback");
+    p.intro(t("rollback.intro"));
     const answer = await p.select({
-      message: "Select a rollback snapshot",
+      message: t("rollback.select"),
       options: entries.map((entry) => ({
         value: entry.id,
         label: `${entry.id} (${formatDate(new Date(entry.createdAt))})`,
@@ -40,23 +41,23 @@ export async function rollbackCommand(
       }))
     });
     if (p.isCancel(answer)) {
-      p.cancel("Rollback cancelled.");
+      p.cancel(t("rollback.cancelled"));
       return;
     }
     selectedId = String(answer);
   }
 
   if (!selectedId) {
-    throw new Error("Please provide a rollback id, or run interactively.");
+    throw new Error(t("rollback.needId"));
   }
 
   if (interactive && !options.yes) {
     const confirm = await p.confirm({
-      message: "Rollback will replace current provider directories with the selected pre-import snapshot. Continue?",
+      message: t("rollback.confirm"),
       initialValue: false
     });
     if (p.isCancel(confirm) || !confirm) {
-      p.cancel("Rollback cancelled.");
+      p.cancel(t("rollback.cancelled"));
       return;
     }
   }
@@ -68,16 +69,16 @@ export async function rollbackCommand(
     return;
   }
 
-  success(`Rolled back to ${restored.id}`);
+  success(t("rollback.restored", { id: restored.id }));
 }
 
 function printRollbackTable(entries: Awaited<ReturnType<typeof listRollbacks>>): void {
   if (entries.length === 0) {
-    warn("No rollback snapshots found.");
+    warn(t("rollback.noSnapshots"));
     return;
   }
 
-  const table = createTable(["ID", "Created", "Clients", "Source Backup"]);
+  const table = createTable([t("rollback.id"), t("rollback.created"), t("rollback.clients"), t("rollback.sourceBackup")]);
   for (const entry of entries) {
     table.push([
       entry.id,

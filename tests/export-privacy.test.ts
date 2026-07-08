@@ -55,6 +55,36 @@ describe("export privacy", () => {
       await fs.remove(dir);
     }
   });
+
+  it("does not exclude legitimate session files because project or file names contain privacy words", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "airelay-export-privacy-"));
+    const home = path.join(dir, "home");
+    const out = path.join(dir, "out");
+    const claudeProvider = new FileProvider({
+      id: "claude",
+      name: "Claude Code",
+      rootName: ".claude",
+      sessionRoots: ["projects"],
+      fullExcludeRoots: [".tmp", "tmp", "cache", "logs", "plugins"]
+    });
+
+    try {
+      const root = path.join(home, ".claude");
+      await fs.ensureDir(path.join(root, "projects", "config"));
+      await fs.ensureDir(path.join(root, "projects", "regular"));
+      await fs.writeFile(path.join(root, "projects", "config", "session.jsonl"), "{}\n");
+      await fs.writeFile(path.join(root, "projects", "regular", "authentication-notes.md"), "ordinary\n");
+      await fs.writeFile(path.join(root, "projects", "regular", "token-usage.md"), "ordinary\n");
+
+      await claudeProvider.copyForExport({ homeDir: home, cwd: dir }, out, {});
+
+      expect(await fs.pathExists(path.join(out, "root", "projects", "config", "session.jsonl"))).toBe(true);
+      expect(await fs.pathExists(path.join(out, "root", "projects", "regular", "authentication-notes.md"))).toBe(true);
+      expect(await fs.pathExists(path.join(out, "root", "projects", "regular", "token-usage.md"))).toBe(true);
+    } finally {
+      await fs.remove(dir);
+    }
+  });
 });
 
 async function seedProviderRoot(home: string): Promise<void> {
@@ -74,4 +104,3 @@ async function seedProviderRoot(home: string): Promise<void> {
   await fs.writeFile(path.join(root, "cache", "blob"), "cache\n");
   await fs.writeFile(path.join(root, "plugins", "plugin.js"), "plugin\n");
 }
-

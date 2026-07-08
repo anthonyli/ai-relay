@@ -41,6 +41,12 @@ export async function loadConfig(env: RuntimeEnv, explicitPath?: string): Promis
   }
 
   const parsed = configPath.endsWith(".json") ? JSON.parse(raw) : YAML.parse(raw);
+  if (parsed && typeof parsed === "object" && "version" in parsed) {
+    const version = (parsed as { version?: unknown }).version;
+    if (version !== undefined && version !== "1.1" && version !== "2") {
+      throw new Error(`Unsupported config version "${String(version)}". Use "1.1" or "2".`);
+    }
+  }
   return ConfigSchema.parse(parsed ?? {});
 }
 

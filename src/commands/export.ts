@@ -3,10 +3,11 @@ import path from "node:path";
 import fs from "fs-extra";
 import * as p from "@clack/prompts";
 import { createZipFromDirectory } from "../archive/zip.js";
+import { t } from "../i18n.js";
 import { createManifest } from "../manifest.js";
 import { printJson, success, warn } from "../output.js";
 import { providers } from "../providers/index.js";
-import { parseProviderId } from "../providers/provider.js";
+import { parseProviderId, PRIVACY_EXCLUSIONS } from "../providers/provider.js";
 import type { BackupManifest, ExportedClient, ProviderId } from "../types.js";
 import type { CommandContext } from "./context.js";
 import { isInteractive } from "./context.js";
@@ -35,7 +36,7 @@ export async function exportCommand(
   }
 
   if (detected.length === 0) {
-    throw new Error("No supported AI CLI sessions found. Run `airelay doctor` for details.");
+    throw new Error(t("export.noClients"));
   }
 
   const interactive = isInteractive(options);
@@ -43,9 +44,9 @@ export async function exportCommand(
   let output = path.resolve(options.output ?? defaultBackupName());
 
   if (interactive && !selectedIds?.length && !options.session?.length) {
-    p.intro("AI Relay Export");
+    p.intro(t("export.intro"));
     const answer = await p.multiselect({
-      message: "Select clients to export",
+      message: t("export.selectClients"),
       options: detected.map((provider) => ({
         value: provider.id,
         label: provider.name,
@@ -55,37 +56,41 @@ export async function exportCommand(
       required: true
     });
     if (p.isCancel(answer)) {
-      p.cancel("Export cancelled.");
+      p.cancel(t("export.cancelled"));
       return;
     }
     const ids = answer as ProviderId[];
     selected = detected.filter((provider) => ids.includes(provider.id));
 
     const outputAnswer = await p.text({
-      message: "Output file",
+      message: t("export.outputFile"),
       placeholder: path.basename(output),
       defaultValue: output
     });
     if (p.isCancel(outputAnswer)) {
-      p.cancel("Export cancelled.");
+      p.cancel(t("export.cancelled"));
       return;
     }
     output = path.resolve(String(outputAnswer || output));
   }
 
-  if ((await fs.pathExists(output)) && !options.yes && interactive) {
-    const overwrite = await p.confirm({
-      message: `${output} already exists. Overwrite?`,
-      initialValue: false
-    });
-    if (p.isCancel(overwrite) || !overwrite) {
-      p.cancel("Export cancelled.");
-      return;
+  if ((await fs.pathExists(output)) && !options.yes) {
+    if (interactive) {
+      const overwrite = await p.confirm({
+        message: t("export.overwrite", { output }),
+        initialValue: false
+      });
+      if (p.isCancel(overwrite) || !overwrite) {
+        p.cancel(t("export.cancelled"));
+        return;
+      }
+    } else {
+      throw new Error(t("export.overwriteNonInteractive", { output }));
     }
   }
 
   const spinner = interactive ? p.spinner() : undefined;
-  spinner?.start("Scanning and creating backup...");
+  spinner?.start(t("export.scanning"));
 
   const stagingDir = await fs.mkdtemp(path.join(os.tmpdir(), "airelay-export-"));
   const clients: ExportedClient[] = [];
@@ -107,19 +112,7 @@ export async function exportCommand(
         session_count: status.sessionCount,
         exported_session_count: exportedSessionCount,
         export_mode: options.full ? "full" : "sessions",
-        privacy_exclusions: [
-          "auth",
-          "tokens",
-          "credentials",
-          "secrets",
-          "config",
-          "settings",
-          "cache",
-          "tmp",
-          "logs",
-          "plugins",
-          "key material"
-        ]
+        privacy_exclusions: PRIVACY_EXCLUSIONS
       });
     }
 
@@ -140,17 +133,17 @@ export async function exportCommand(
     }, { spaces: 2 });
 
     await createZipFromDirectory(stagingDir, output);
-    spinner?.stop(`Backup created: ${output}`);
+    spinner?.stop(t("export.created", { output }));
 
     if (options.json) {
       printJson({ output, manifest });
       return;
     }
 
-    success(`Backup created: ${output}`);
-    warn("Privacy-sensitive files are always excluded from backups.");
+    success(t("export.created", { output }));
+    warn(t("export.privacy"));
     if (!options.full) {
-      warn("Default export includes session/history data only. Use --full for a broader non-secret provider backup.");
+      warn(t("export.defaultMode"));
     }
   } finally {
     await fs.remove(stagingDir);
