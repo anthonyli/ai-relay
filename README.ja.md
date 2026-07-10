@@ -49,6 +49,8 @@ airelay inspect backup_2026-07-07.zip
 airelay import backup_2026-07-07.zip
 ```
 
+対話型ターミナルでは、AI Relay は最大 24 時間に 1 回 npm の新しい安定版を確認します。JSON 出力、CI、非対話コマンド、オフライン時の失敗では表示せず、`AIRELAY_NO_UPDATE_CHECK=1` で明示的に無効化できます。
+
 ## ローカルビルド
 
 ローカル開発用：
@@ -147,7 +149,7 @@ V2 コマンドはストレージ設定後に利用します。
 ```bash
 airelay push
 airelay pull
-airelay sync
+airelay sync backup_2026-07-08.zip --yes
 ```
 
 ## セーフティモデル
@@ -155,6 +157,7 @@ airelay sync
 `airelay` は local-first かつ保守的な動作をデフォルトにしています。
 
 - デフォルトのエクスポートは session/history のみです。
+- Claude のデフォルト対象は `projects`、`sessions`、`conversations`、ルートの `history.jsonl`、Codex は `sessions`、`archived_sessions`、ルートの `history.jsonl`、`session_index.jsonl` です。
 - `--full` はより広い非機密データを対象にしますが、機密ファイルは除外されます。
 - インポートは `--overwrite` を指定しない限り既存ファイルを保持します。
 - 各インポート前に `~/.airelay/rollbacks/` へスナップショットを作成します。
@@ -228,6 +231,14 @@ airelay push backup_2026-07-08.zip
 ```bash
 airelay pull backup_2026-07-08.zip
 ```
+
+リモートバックアップをローカルセッションへマージし、統合結果を再エクスポートして同じリモートオブジェクトを更新します。
+
+```bash
+airelay sync backup_2026-07-08.zip --yes
+```
+
+最後のアップロードで対象のリモートオブジェクトを置き換えるため、非対話実行では `--yes` が必須です。
 
 ## プロモーション文言
 

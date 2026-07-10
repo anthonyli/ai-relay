@@ -49,6 +49,8 @@ airelay inspect backup_2026-07-07.zip
 airelay import backup_2026-07-07.zip
 ```
 
+대화형 터미널에서 AI Relay는 최대 24시간마다 한 번 npm의 새 안정 버전을 확인합니다. JSON 출력, CI, 비대화형 명령 및 오프라인 오류에서는 알림을 생략하며, `AIRELAY_NO_UPDATE_CHECK=1`로 명시적으로 끌 수 있습니다.
+
 ## 로컬 빌드
 
 로컬 개발용:
@@ -147,7 +149,7 @@ V2 명령은 스토리지를 설정한 뒤 사용합니다.
 ```bash
 airelay push
 airelay pull
-airelay sync
+airelay sync backup_2026-07-08.zip --yes
 ```
 
 ## 안전 모델
@@ -155,6 +157,7 @@ airelay sync
 `airelay`는 local-first이며 보수적인 기본 동작을 사용합니다.
 
 - 기본 내보내기는 session/history 데이터만 포함합니다.
+- Claude 기본 대상은 `projects`, `sessions`, `conversations`, 루트 `history.jsonl`이며, Codex 기본 대상은 `sessions`, `archived_sessions`, 루트 `history.jsonl`, `session_index.jsonl`입니다.
 - `--full`은 더 넓은 비민감 데이터를 포함하지만 민감한 파일은 계속 제외합니다.
 - 가져오기는 `--overwrite`를 지정하지 않는 한 기존 파일을 유지합니다.
 - 각 가져오기 전에 `~/.airelay/rollbacks/`에 롤백 스냅샷을 생성합니다.
@@ -228,6 +231,14 @@ airelay push backup_2026-07-08.zip
 ```bash
 airelay pull backup_2026-07-08.zip
 ```
+
+원격 백업을 로컬 세션에 병합하고, 병합된 결과를 다시 내보낸 뒤 같은 원격 객체를 갱신합니다.
+
+```bash
+airelay sync backup_2026-07-08.zip --yes
+```
+
+마지막 업로드가 선택한 원격 객체를 교체하므로 비대화형 `sync` 실행에는 `--yes`가 필요합니다.
 
 ## 홍보 문구
 

@@ -49,6 +49,8 @@ airelay inspect backup_2026-07-07.zip
 airelay import backup_2026-07-07.zip
 ```
 
+在交互式终端中运行时，AI Relay 最多每 24 小时检查一次 npm 稳定版更新。JSON 输出、CI、非交互命令和离线失败都会静默跳过；可设置 `AIRELAY_NO_UPDATE_CHECK=1` 显式关闭。
+
 ## 本地构建
 
 用于本地开发：
@@ -147,7 +149,7 @@ V2 命令会在显式配置存储后才启用：
 ```bash
 airelay push
 airelay pull
-airelay sync
+airelay sync backup_2026-07-08.zip --yes
 ```
 
 ## 安全模型
@@ -155,6 +157,7 @@ airelay sync
 `airelay` 默认采用本地优先和保守策略。
 
 - 默认导出只包含 session/history 数据。
+- Claude 默认覆盖 `projects`、`sessions`、`conversations` 和根目录 `history.jsonl`；Codex 默认覆盖 `sessions`、`archived_sessions`、根目录 `history.jsonl` 和 `session_index.jsonl`。
 - `--full` 会导出更完整的非敏感客户端数据，但仍会排除隐私敏感文件。
 - 导入默认保留本机已有文件，除非显式传入 `--overwrite`。
 - 每次导入前，`airelay` 会在 `~/.airelay/rollbacks/` 下创建回滚快照。
@@ -228,6 +231,14 @@ airelay push backup_2026-07-08.zip
 ```bash
 airelay pull backup_2026-07-08.zip
 ```
+
+把远程备份合并到本机会话，重新导出合并结果，并覆盖同一个远程对象：
+
+```bash
+airelay sync backup_2026-07-08.zip --yes
+```
+
+由于最后一步会替换选中的远程对象，非交互场景执行 `sync` 时必须显式传入 `--yes`。
 
 ## 推广文案
 

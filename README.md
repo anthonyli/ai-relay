@@ -49,6 +49,8 @@ airelay inspect backup_2026-07-07.zip
 airelay import backup_2026-07-07.zip
 ```
 
+AI Relay checks npm for a newer stable version at most once every 24 hours when run in an interactive terminal. The check is skipped for JSON output, CI, non-interactive commands, and offline failures. Set `AIRELAY_NO_UPDATE_CHECK=1` to disable it explicitly.
+
 ## Build locally
 
 For local development:
@@ -147,7 +149,7 @@ V2 commands are intentionally gated until storage is configured:
 ```bash
 airelay push
 airelay pull
-airelay sync
+airelay sync backup_2026-07-08.zip --yes
 ```
 
 ## Safety model
@@ -155,6 +157,7 @@ airelay sync
 `airelay` is local-first and conservative by default.
 
 - Default export includes session/history data only.
+- Claude defaults cover `projects`, `sessions`, `conversations`, and root-level `history.jsonl`; Codex defaults cover `sessions`, `archived_sessions`, root-level `history.jsonl`, and `session_index.jsonl`.
 - `--full` exports broader non-secret provider data, but still excludes privacy-sensitive files.
 - Import keeps existing local files unless `--overwrite` is passed.
 - Before every import, `airelay` creates a rollback snapshot under `~/.airelay/rollbacks/`.
@@ -224,6 +227,14 @@ Download and restore that backup:
 ```bash
 airelay pull backup_2026-07-08.zip
 ```
+
+Merge a remote backup into the local sessions, export the merged result, and overwrite the same remote object:
+
+```bash
+airelay sync backup_2026-07-08.zip --yes
+```
+
+`sync` requires `--yes` in non-interactive use because the final upload replaces the selected remote object.
 
 ## International documentation
 
