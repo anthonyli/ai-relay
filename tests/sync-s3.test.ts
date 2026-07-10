@@ -4,7 +4,7 @@ import path from "node:path";
 import os from "node:os";
 import { exportCommand } from "../src/commands/export.js";
 import { syncCommand } from "../src/commands/sync.js";
-import { readZipText } from "../src/archive/zip.js";
+import { listZipEntries, readZipText } from "../src/archive/zip.js";
 import { parseManifest } from "../src/manifest.js";
 import type { AppConfig } from "../src/config.js";
 import type { RemoteStorage } from "../src/storage/index.js";
@@ -101,6 +101,97 @@ describe("s3 sync", () => {
         backup: "backup_2026-07-08.zip"
       });
       expect(await fs.readFile(path.join(targetHome, ".codex", "sessions", "one.jsonl"), "utf8")).toBe("{}\n");
+    } finally {
+      await fs.remove(dir);
+    }
+  });
+
+  it("requires explicit confirmation before sync overwrites a remote key", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "airelay-sync-"));
+    let called = false;
+    const storage: RemoteStorage = {
+      async uploadFile() {
+        called = true;
+      },
+      async downloadFile() {
+        called = true;
+      }
+    };
+
+    try {
+      await expect(syncCommand(
+        { env: { homeDir: path.join(dir, "home"), cwd: dir }, config: s3Config },
+        "sync",
+        { storage, backup: "shared.zip" }
+      )).rejects.toThrow(/--yes/);
+      expect(called).toBe(false);
+    } finally {
+      await fs.remove(dir);
+    }
+  });
+
+  it("sync pulls, merges, exports, then uploads to the same remote key", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "airelay-sync-"));
+    const sourceHome = path.join(dir, "source-home");
+    const targetHome = path.join(dir, "target-home");
+    const remoteBackup = path.join(dir, "remote.zip");
+    const uploaded = path.join(dir, "uploaded.zip");
+    const calls: string[] = [];
+    await fs.ensureDir(path.join(sourceHome, ".codex", "sessions"));
+    await fs.ensureDir(path.join(targetHome, ".codex", "sessions"));
+    await fs.writeFile(path.join(sourceHome, ".codex", "sessions", "remote.jsonl"), "remote\n");
+    await fs.writeFile(path.join(targetHome, ".codex", "sessions", "local.jsonl"), "local\n");
+    await exportCommand({ env: { homeDir: sourceHome, cwd: dir }, config: s3Config }, {
+      output: remoteBackup,
+      yes: true
+    });
+
+    const storage: RemoteStorage = {
+      async downloadFile(request) {
+        calls.push(`download:${request.key}`);
+        await fs.copy(remoteBackup, request.filePath);
+      },
+      async uploadFile(request) {
+        calls.push(`upload:${request.key}`);
+        await fs.copy(request.filePath, uploaded);
+      }
+    };
+
+    try {
+      await syncCommand({ env: { homeDir: targetHome, cwd: dir }, config: s3Config }, "sync", {
+        storage,
+        backup: "shared.zip",
+        yes: true
+      });
+
+      expect(calls).toEqual(["download:snapshots/shared.zip", "upload:snapshots/shared.zip"]);
+      const entries = await listZipEntries(uploaded);
+      expect(entries).toContain("clients/codex/root/sessions/local.jsonl");
+      expect(entries).toContain("clients/codex/root/sessions/remote.jsonl");
+    } finally {
+      await fs.remove(dir);
+    }
+  });
+
+  it("does not upload when sync download fails", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "airelay-sync-"));
+    let uploaded = false;
+    const storage: RemoteStorage = {
+      async downloadFile() {
+        throw new Error("download failed");
+      },
+      async uploadFile() {
+        uploaded = true;
+      }
+    };
+
+    try {
+      await expect(syncCommand(
+        { env: { homeDir: path.join(dir, "home"), cwd: dir }, config: s3Config },
+        "sync",
+        { storage, backup: "shared.zip", yes: true }
+      )).rejects.toThrow("download failed");
+      expect(uploaded).toBe(false);
     } finally {
       await fs.remove(dir);
     }

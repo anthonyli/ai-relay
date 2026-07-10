@@ -10,18 +10,38 @@ const SAVED_WORKSPACE_ROOTS_KEY = "electron-saved-workspace-roots";
 const PROJECT_ORDER_KEY = "project-order";
 const SIDEBAR_PROJECT_KEY_PREFIX = "sidebar-project-expanded-v1-codex:";
 
-export async function syncCodexAppProjects(env: RuntimeEnv): Promise<number> {
+interface ExecuteFileResult {
+  stdout: string;
+  stderr: string;
+}
+
+type ExecuteFile = (file: string, args: string[]) => Promise<ExecuteFileResult>;
+
+export interface CodexAppSyncResult {
+  addedProjectCount: number;
+  sqlite: {
+    status: "not-found" | "synced" | "skipped" | "failed";
+    message?: string;
+  };
+}
+
+export interface CodexAppSyncDependencies {
+  executeFile?: ExecuteFile;
+}
+
+export async function syncCodexAppProjects(
+  env: RuntimeEnv,
+  dependencies: CodexAppSyncDependencies = {}
+): Promise<CodexAppSyncResult> {
   const codexRoot = path.join(env.homeDir, ".codex");
   const sessionsRoot = path.join(codexRoot, "sessions");
   const globalStatePath = path.join(codexRoot, ".codex-global-state.json");
-  if (!(await fs.pathExists(sessionsRoot))) {
-    return 0;
-  }
+  const executeFile = dependencies.executeFile ?? defaultExecuteFile;
 
-  const projectRoots = await collectSessionProjectRoots(sessionsRoot);
-  await syncLocalThreadCatalog(codexRoot);
+  const projectRoots = (await fs.pathExists(sessionsRoot)) ? await collectSessionProjectRoots(sessionsRoot) : [];
+  const sqlite = await syncLocalThreadCatalog(codexRoot, executeFile);
   if (projectRoots.length === 0) {
-    return 0;
+    return { addedProjectCount: 0, sqlite };
   }
 
   const state = await readCodexGlobalState(globalStatePath);
@@ -44,14 +64,14 @@ export async function syncCodexAppProjects(env: RuntimeEnv): Promise<number> {
   }
 
   if (!changed) {
-    return 0;
+    return { addedProjectCount: 0, sqlite };
   }
 
   persisted[SAVED_WORKSPACE_ROOTS_KEY] = nextSavedRoots;
   persisted[PROJECT_ORDER_KEY] = nextProjectOrder;
   await fs.ensureDir(codexRoot);
   await fs.writeJson(globalStatePath, state);
-  return added;
+  return { addedProjectCount: added, sqlite };
 }
 
 async function collectSessionProjectRoots(sessionsRoot: string): Promise<string[]> {
@@ -66,14 +86,39 @@ async function collectSessionProjectRoots(sessionsRoot: string): Promise<string[
   return roots;
 }
 
-async function syncLocalThreadCatalog(codexRoot: string): Promise<void> {
+async function syncLocalThreadCatalog(
+  codexRoot: string,
+  executeFile: ExecuteFile
+): Promise<CodexAppSyncResult["sqlite"]> {
   const stateDb = path.join(codexRoot, "state_5.sqlite");
   const catalogDb = path.join(codexRoot, "sqlite", "codex-dev.db");
   if (!(await fs.pathExists(stateDb)) || !(await fs.pathExists(catalogDb))) {
-    return;
+    return { status: "not-found" };
   }
 
-  const sql = `
+  try {
+    const missingSchema = [
+      ...(await missingColumns(executeFile, stateDb, "threads", [
+        "id", "title", "created_at", "updated_at", "cwd", "source", "model_provider", "git_branch", "archived", "preview"
+      ])),
+      ...(await missingColumns(executeFile, catalogDb, "local_thread_catalog", [
+        "host_id", "thread_id", "display_title", "source_created_at", "source_updated_at", "cwd", "source_kind",
+        "source_detail", "model_provider", "git_branch", "observation_sequence", "missing_candidate"
+      ])),
+      ...(await missingColumns(executeFile, catalogDb, "local_thread_catalog_hosts", ["host_id", "host_kind"])),
+      ...(await missingColumns(executeFile, catalogDb, "local_thread_catalog_metadata", ["id", "catalog_revision"])),
+      ...(await missingColumns(executeFile, catalogDb, "local_thread_catalog_sync_state", [
+        "host_id", "watermark_updated_at", "initial_build_complete", "observation_sequence"
+      ]))
+    ];
+    if (missingSchema.length > 0) {
+      return {
+        status: "skipped",
+        message: `Codex App sqlite schema is missing: ${missingSchema.join(", ")}`
+      };
+    }
+
+    const sql = `
 ATTACH DATABASE '${escapeSqlString(stateDb)}' AS state;
 WITH source_threads AS (
   SELECT
@@ -136,7 +181,44 @@ ON CONFLICT(host_id) DO UPDATE SET
 DETACH DATABASE state;
 `;
 
-  await execFileAsync("sqlite3", [catalogDb, sql]).catch(() => undefined);
+    await executeFile("sqlite3", [catalogDb, sql]);
+    return { status: "synced" };
+  } catch (error) {
+    return { status: "failed", message: sqliteErrorMessage(error) };
+  }
+}
+
+async function missingColumns(
+  executeFile: ExecuteFile,
+  database: string,
+  table: string,
+  requiredColumns: string[]
+): Promise<string[]> {
+  const result = await executeFile("sqlite3", [database, `PRAGMA table_info('${escapeSqlString(table)}');`]);
+  const actualColumns = new Set(
+    result.stdout
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((line) => line.split("|")[1])
+      .filter((column): column is string => Boolean(column))
+  );
+  if (actualColumns.size === 0) {
+    return [`${table} table`];
+  }
+  return requiredColumns.filter((column) => !actualColumns.has(column)).map((column) => `${table}.${column}`);
+}
+
+async function defaultExecuteFile(file: string, args: string[]): Promise<ExecuteFileResult> {
+  const result = await execFileAsync(file, args);
+  return { stdout: String(result.stdout ?? ""), stderr: String(result.stderr ?? "") };
+}
+
+function sqliteErrorMessage(error: unknown): string {
+  if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+    return "sqlite3 command is not available";
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return message.split(/\r?\n/)[0]?.slice(0, 240) || "sqlite synchronization failed";
 }
 
 function escapeSqlString(value: string): string {

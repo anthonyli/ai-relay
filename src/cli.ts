@@ -120,7 +120,8 @@ export function createCli(dependencies: CliDependencies = {}): Command {
       .command(action)
       .description(`V2 cloud ${action} (requires explicit storage config).`)
       .argument("[backup]", "backup zip file name or remote object key")
-      .action((backup) => run((ctx) => syncCommand(ctx, action, { backup }))());
+      .option("-y, --yes", "confirm remote overwrite for sync")
+      .action((backup, options) => run((ctx) => syncCommand(ctx, action, { backup, yes: options.yes }))());
   }
 
   return program;

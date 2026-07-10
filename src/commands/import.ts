@@ -4,6 +4,7 @@ import fs from "fs-extra";
 import * as p from "@clack/prompts";
 import { extractZip, readZipText } from "../archive/zip.js";
 import { syncCodexAppProjects } from "../codex-app.js";
+import type { CodexAppSyncResult } from "../codex-app.js";
 import { t } from "../i18n.js";
 import { parseManifest } from "../manifest.js";
 import { printJson, success, warn } from "../output.js";
@@ -120,7 +121,7 @@ export async function importCommand(
     await extractZip(backupFile, extractDir);
     spinner?.message(t("import.restoringClients"));
     const restored: string[] = [];
-    let codexAppProjectCount = 0;
+    let codexAppSync: CodexAppSyncResult | undefined;
 
     for (const provider of finalProviders) {
       const sourceRoot = path.join(extractDir, "clients", provider.id);
@@ -133,7 +134,7 @@ export async function importCommand(
         overwrite
       });
       if (provider.id === "codex") {
-        codexAppProjectCount = await syncCodexAppProjects(context.env);
+        codexAppSync = await syncCodexAppProjects(context.env);
       }
       restored.push(provider.id);
     }
@@ -141,14 +142,17 @@ export async function importCommand(
     spinner?.stop(t("import.restoreComplete"));
 
     if (options.json) {
-      printJson({ restored, manifest, rollback, codexAppProjectCount });
+      printJson({ restored, manifest, rollback, codexAppSync });
       return;
     }
 
     success(t("import.restored", { clients: restored.join(", ") }));
-    if (codexAppProjectCount > 0) {
-      success(t("import.codexAppProjects", { count: String(codexAppProjectCount) }));
+    if (codexAppSync && codexAppSync.addedProjectCount > 0) {
+      success(t("import.codexAppProjects", { count: String(codexAppSync.addedProjectCount) }));
       warn(t("import.codexAppRestart"));
+    }
+    if (codexAppSync?.sqlite.status === "skipped" || codexAppSync?.sqlite.status === "failed") {
+      warn(t("import.codexAppSqliteWarning", { reason: codexAppSync.sqlite.message ?? codexAppSync.sqlite.status }));
     }
     success(t("import.rollbackSnapshot", { id: rollback.id }));
     if (!overwrite) {

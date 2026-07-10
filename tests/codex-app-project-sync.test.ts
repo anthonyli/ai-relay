@@ -4,6 +4,7 @@ import path from "node:path";
 import os from "node:os";
 import { execFileSync } from "node:child_process";
 import { createZipFromDirectory } from "../src/archive/zip.js";
+import { syncCodexAppProjects } from "../src/codex-app.js";
 import { importCommand } from "../src/commands/import.js";
 import { createManifest } from "../src/manifest.js";
 
@@ -149,15 +150,71 @@ describe("Codex App project sync", () => {
         );`
       ]);
 
-      await import("../src/codex-app.js").then(({ syncCodexAppProjects }) =>
-        syncCodexAppProjects({ homeDir: home, cwd: dir })
-      );
+      const result = await syncCodexAppProjects({ homeDir: home, cwd: dir });
 
       const row = execFileSync("sqlite3", [
         catalogDb,
         "SELECT thread_id, display_title, cwd FROM local_thread_catalog WHERE thread_id = 'thread-one';"
       ]).toString().trim();
       expect(row).toBe(`thread-one|Imported project|${project}`);
+      expect(result.sqlite.status).toBe("synced");
+    } finally {
+      await fs.remove(dir);
+    }
+  });
+
+  it("reports when Codex App sqlite databases are not present", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "airelay-codex-catalog-missing-"));
+    try {
+      const result = await syncCodexAppProjects({ homeDir: path.join(dir, "home"), cwd: dir });
+      expect(result).toEqual({
+        addedProjectCount: 0,
+        sqlite: { status: "not-found" }
+      });
+    } finally {
+      await fs.remove(dir);
+    }
+  });
+
+  it("reports an incompatible Codex App sqlite schema without failing session restore", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "airelay-codex-catalog-schema-"));
+    const home = path.join(dir, "home");
+    const stateDb = path.join(home, ".codex", "state_5.sqlite");
+    const catalogDb = path.join(home, ".codex", "sqlite", "codex-dev.db");
+    try {
+      await fs.ensureDir(path.dirname(stateDb));
+      await fs.ensureDir(path.dirname(catalogDb));
+      execFileSync("sqlite3", [stateDb, "VACUUM;"]);
+      execFileSync("sqlite3", [catalogDb, "VACUUM;"]);
+
+      const result = await syncCodexAppProjects({ homeDir: home, cwd: dir });
+
+      expect(result.addedProjectCount).toBe(0);
+      expect(result.sqlite.status).toBe("skipped");
+      expect(result.sqlite.message).toMatch(/schema/i);
+    } finally {
+      await fs.remove(dir);
+    }
+  });
+
+  it("reports sqlite command failures instead of swallowing them", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "airelay-codex-catalog-failed-"));
+    const home = path.join(dir, "home");
+    const stateDb = path.join(home, ".codex", "state_5.sqlite");
+    const catalogDb = path.join(home, ".codex", "sqlite", "codex-dev.db");
+    try {
+      await fs.ensureDir(path.dirname(stateDb));
+      await fs.ensureDir(path.dirname(catalogDb));
+      await fs.writeFile(stateDb, "placeholder");
+      await fs.writeFile(catalogDb, "placeholder");
+
+      const result = await syncCodexAppProjects(
+        { homeDir: home, cwd: dir },
+        { executeFile: async () => { throw new Error("sqlite unavailable"); } }
+      );
+
+      expect(result.addedProjectCount).toBe(0);
+      expect(result.sqlite).toEqual({ status: "failed", message: "sqlite unavailable" });
     } finally {
       await fs.remove(dir);
     }
