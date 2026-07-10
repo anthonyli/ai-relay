@@ -8,6 +8,7 @@
 - Validate backup manifests and enforce ZIP entry-count and uncompressed-size limits before restore operations.
 - Make `sync` a confirmed pull-merge-export-upload transaction that treats its argument only as a remote object key.
 - Report Codex App SQLite index synchronization results instead of silently discarding errors.
+- Refresh the dependency lockfile and move the production `glob` dependency to a release without the published command-injection vulnerability.
 - Repair the Chinese and English poster assets without changing their product scenarios or copy.
 
 ## 0.1.1
