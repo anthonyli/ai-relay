@@ -8,7 +8,8 @@ const provider = new FileProvider({
   id: "codex",
   name: "Codex CLI",
   rootName: ".codex",
-  sessionRoots: ["sessions", "history"],
+  sessionRoots: ["sessions", "archived_sessions"],
+  defaultExportRoots: ["sessions", "archived_sessions", "history.jsonl", "session_index.jsonl"],
   fullExcludeRoots: [".tmp", "tmp", "cache", "logs", "plugins"]
 });
 
@@ -24,7 +25,9 @@ describe("export privacy", () => {
       await provider.copyForExport({ homeDir: home, cwd: dir }, out, {});
 
       expect(await fs.pathExists(path.join(out, "root", "sessions", "one.jsonl"))).toBe(true);
-      expect(await fs.pathExists(path.join(out, "root", "history", "history.jsonl"))).toBe(true);
+      expect(await fs.pathExists(path.join(out, "root", "archived_sessions", "archived.jsonl"))).toBe(true);
+      expect(await fs.pathExists(path.join(out, "root", "history.jsonl"))).toBe(true);
+      expect(await fs.pathExists(path.join(out, "root", "session_index.jsonl"))).toBe(true);
       expect(await fs.pathExists(path.join(out, "root", "notes.md"))).toBe(false);
       expect(await fs.pathExists(path.join(out, "root", "config.toml"))).toBe(false);
       expect(await fs.pathExists(path.join(out, "root", "auth.json"))).toBe(false);
@@ -65,6 +68,7 @@ describe("export privacy", () => {
       name: "Claude Code",
       rootName: ".claude",
       sessionRoots: ["projects"],
+      defaultExportRoots: ["projects", "history.jsonl"],
       fullExcludeRoots: [".tmp", "tmp", "cache", "logs", "plugins"]
     });
 
@@ -75,12 +79,14 @@ describe("export privacy", () => {
       await fs.writeFile(path.join(root, "projects", "config", "session.jsonl"), "{}\n");
       await fs.writeFile(path.join(root, "projects", "regular", "authentication-notes.md"), "ordinary\n");
       await fs.writeFile(path.join(root, "projects", "regular", "token-usage.md"), "ordinary\n");
+      await fs.writeFile(path.join(root, "history.jsonl"), "{}\n");
 
       await claudeProvider.copyForExport({ homeDir: home, cwd: dir }, out, {});
 
       expect(await fs.pathExists(path.join(out, "root", "projects", "config", "session.jsonl"))).toBe(true);
       expect(await fs.pathExists(path.join(out, "root", "projects", "regular", "authentication-notes.md"))).toBe(true);
       expect(await fs.pathExists(path.join(out, "root", "projects", "regular", "token-usage.md"))).toBe(true);
+      expect(await fs.pathExists(path.join(out, "root", "history.jsonl"))).toBe(true);
     } finally {
       await fs.remove(dir);
     }
@@ -90,12 +96,14 @@ describe("export privacy", () => {
 async function seedProviderRoot(home: string): Promise<void> {
   const root = path.join(home, ".codex");
   await fs.ensureDir(path.join(root, "sessions"));
-  await fs.ensureDir(path.join(root, "history"));
+  await fs.ensureDir(path.join(root, "archived_sessions"));
   await fs.ensureDir(path.join(root, ".tmp"));
   await fs.ensureDir(path.join(root, "cache"));
   await fs.ensureDir(path.join(root, "plugins"));
   await fs.writeFile(path.join(root, "sessions", "one.jsonl"), "{}\n");
-  await fs.writeFile(path.join(root, "history", "history.jsonl"), "{}\n");
+  await fs.writeFile(path.join(root, "archived_sessions", "archived.jsonl"), "{}\n");
+  await fs.writeFile(path.join(root, "history.jsonl"), "{}\n");
+  await fs.writeFile(path.join(root, "session_index.jsonl"), "{}\n");
   await fs.writeFile(path.join(root, "notes.md"), "ordinary\n");
   await fs.writeFile(path.join(root, "config.toml"), "api_key = \"secret\"\n");
   await fs.writeFile(path.join(root, "auth.json"), "{\"token\":\"secret\"}\n");

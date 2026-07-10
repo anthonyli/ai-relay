@@ -49,6 +49,7 @@ export interface ProviderDefinition {
   versionCommand?: string;
   versionArgs?: string[];
   sessionRoots: string[];
+  defaultExportRoots?: string[];
   fullExcludeRoots?: string[];
 }
 
@@ -154,7 +155,11 @@ export class FileProvider implements Provider {
       if (options.full) {
         await copyFullProviderRoot(sourceRoot, rootTarget, this.definition.fullExcludeRoots ?? []);
       } else {
-        await copySessionRoots(sourceRoot, rootTarget, this.definition.sessionRoots);
+        await copySessionRoots(
+          sourceRoot,
+          rootTarget,
+          this.definition.defaultExportRoots ?? this.definition.sessionRoots
+        );
       }
       return (await this.listSessions(env)).length;
     }
@@ -241,6 +246,14 @@ function matchSessions(providerId: ProviderId, sessions: SessionInfo[], requeste
 async function walkFiles(root: string): Promise<string[]> {
   const result: string[] = [];
   if (!(await fs.pathExists(root))) {
+    return result;
+  }
+
+  const rootStat = await fs.stat(root).catch(() => undefined);
+  if (rootStat?.isFile()) {
+    return [root];
+  }
+  if (!rootStat?.isDirectory()) {
     return result;
   }
 

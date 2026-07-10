@@ -2,7 +2,8 @@ import { Command } from "commander";
 import { ensureUserConfigDir, loadConfig } from "./config.js";
 import { createRuntimeEnv } from "./env.js";
 import { APP_VERSION } from "./manifest.js";
-import { error } from "./output.js";
+import { error, printUpdateNotice } from "./output.js";
+import { checkForUpdate } from "./update-check.js";
 import { doctorCommand } from "./commands/doctor.js";
 import { exportCommand } from "./commands/export.js";
 import { importCommand } from "./commands/import.js";
@@ -12,7 +13,14 @@ import { rollbackCommand } from "./commands/rollback.js";
 import { syncCommand } from "./commands/sync.js";
 import type { CommandContext } from "./commands/context.js";
 
-export function createCli(): Command {
+export interface CliDependencies {
+  argv?: string[];
+  env?: NodeJS.ProcessEnv;
+  stdoutIsTTY?: boolean;
+  checkForUpdate?: typeof checkForUpdate;
+}
+
+export function createCli(dependencies: CliDependencies = {}): Command {
   const program = new Command();
 
   program
@@ -33,7 +41,20 @@ export function createCli(): Command {
   function run(handler: (context: CommandContext) => Promise<void>) {
     return async () => {
       try {
-        await handler(await context());
+        const commandContext = await context();
+        const updatePromise = Promise.resolve()
+          .then(() => (dependencies.checkForUpdate ?? checkForUpdate)({
+            homeDir: commandContext.env.homeDir,
+            isTTY: dependencies.stdoutIsTTY ?? Boolean(process.stdout.isTTY),
+            argv: dependencies.argv ?? process.argv,
+            env: dependencies.env ?? process.env
+          }))
+          .catch(() => undefined);
+        await handler(commandContext);
+        const update = await updatePromise;
+        if (update) {
+          printUpdateNotice(update);
+        }
       } catch (caught) {
         error(caught instanceof Error ? caught.message : String(caught));
         process.exitCode = 1;

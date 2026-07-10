@@ -1,7 +1,7 @@
 import os from "node:os";
 import type { BackupManifest, ExportedClient } from "./types.js";
-
-export const APP_VERSION = "0.1.0";
+export { APP_VERSION } from "./version.js";
+import { APP_VERSION } from "./version.js";
 
 export function createManifest(clients: ExportedClient[]): BackupManifest {
   return {

@@ -1,5 +1,7 @@
 import Table from "cli-table3";
 import pc from "picocolors";
+import { t } from "./i18n.js";
+import type { UpdateInfo } from "./update-check.js";
 
 export function success(message: string): void {
   console.log(pc.green(`✓ ${message}`));
@@ -15,6 +17,12 @@ export function error(message: string): void {
 
 export function info(message: string): void {
   console.log(pc.cyan(message));
+}
+
+export function printUpdateNotice(update: UpdateInfo): void {
+  warn(t("update.available", { current: update.currentVersion, latest: update.latestVersion }));
+  info(t("update.install", { command: update.installCommand }));
+  info(t("update.changelog", { url: update.changelogUrl }));
 }
 
 export function createTable(head: string[]): Table.Table {
@@ -38,4 +46,3 @@ export function formatDate(date: Date): string {
   }
   return date.toISOString().replace("T", " ").replace(/\.\d{3}Z$/, " UTC");
 }
-

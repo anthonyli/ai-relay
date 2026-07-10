@@ -80,7 +80,11 @@ const translations = {
     "sync.requiresStorage": "airelay {action} requires V2 Storage configuration.",
     "sync.storageHint": "Default mode is V1.1 local-only. Use export/import for now, or configure cloud_sync.enabled=true with a non-local storage type.",
     "sync.pushed": "Uploaded backup to {target}",
-    "sync.pulled": "Downloaded and restored backup from {source}"
+    "sync.pulled": "Downloaded and restored backup from {source}",
+
+    "update.available": "AI Relay update available: {current} → {latest}",
+    "update.install": "Update with: {command}",
+    "update.changelog": "Changes: {url}"
   },
   zh: {
     "doctor.client": "客户端",
@@ -159,7 +163,11 @@ const translations = {
     "sync.requiresStorage": "airelay {action} 需要 V2 存储配置。",
     "sync.storageHint": "当前默认使用本地 V1.1 模式。现在可使用 export/import，或配置 cloud_sync.enabled=true 和非本地存储类型。",
     "sync.pushed": "已上传备份到 {target}",
-    "sync.pulled": "已下载并恢复备份：{source}"
+    "sync.pulled": "已下载并恢复备份：{source}",
+
+    "update.available": "AI Relay 有新版本：{current} → {latest}",
+    "update.install": "升级命令：{command}",
+    "update.changelog": "更新内容：{url}"
   }
 } as const;
 
