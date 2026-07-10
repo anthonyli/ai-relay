@@ -11,6 +11,16 @@ export interface ZipLimits {
   maxTotalUncompressedBytes: number;
 }
 
+export interface ZipValidationState {
+  entryCount: number;
+  totalUncompressedBytes: number;
+}
+
+export interface ZipEntryMetadata {
+  fileName: string;
+  uncompressedSize: number;
+}
+
 export const DEFAULT_ZIP_LIMITS: ZipLimits = {
   maxEntries: 100_000,
   maxEntryUncompressedBytes: 5 * 1024 ** 3,
@@ -62,11 +72,13 @@ export async function extractZip(
   destinationDir: string,
   options: { limits?: ZipLimits } = {}
 ): Promise<void> {
-  await validateZipArchive(zipFile, options.limits);
+  const limits = options.limits ?? DEFAULT_ZIP_LIMITS;
+  validateLimits(limits);
   await fs.ensureDir(destinationDir);
 
   const zip = await openZip(zipFile);
   await new Promise<void>((resolve, reject) => {
+    const validationState: ZipValidationState = { entryCount: 0, totalUncompressedBytes: 0 };
     let settled = false;
     const finish = (error?: unknown) => {
       if (settled) {
@@ -84,6 +96,7 @@ export async function extractZip(
     zip.on("entry", (entry) => {
       void (async () => {
         try {
+          validateZipEntry(entry, validationState, limits);
           const targetPath = safeJoin(destinationDir, entry.fileName);
           if (/\/$/.test(entry.fileName)) {
             await fs.ensureDir(targetPath);
@@ -166,8 +179,7 @@ export async function validateZipArchive(
   const zip = await openZip(zipFile);
   return new Promise<void>((resolve, reject) => {
     let settled = false;
-    let entryCount = 0;
-    let totalUncompressedBytes = 0;
+    const validationState: ZipValidationState = { entryCount: 0, totalUncompressedBytes: 0 };
     const finish = (error?: unknown) => {
       if (settled) {
         return;
@@ -184,23 +196,7 @@ export async function validateZipArchive(
     zip.readEntry();
     zip.on("entry", (entry) => {
       try {
-        entryCount += 1;
-        if (entryCount > limits.maxEntries) {
-          throw new Error(`Backup zip entry count exceeds the limit of ${limits.maxEntries}.`);
-        }
-        if (!isSafeZipEntryName(entry.fileName)) {
-          throw new Error(`Unsafe zip entry path: ${entry.fileName}`);
-        }
-        if (!Number.isSafeInteger(entry.uncompressedSize) || entry.uncompressedSize < 0) {
-          throw new Error(`Backup zip entry has an invalid uncompressed size: ${entry.fileName}`);
-        }
-        if (entry.uncompressedSize > limits.maxEntryUncompressedBytes) {
-          throw new Error(`Backup zip single entry exceeds the uncompressed size limit: ${entry.fileName}`);
-        }
-        totalUncompressedBytes += entry.uncompressedSize;
-        if (!Number.isSafeInteger(totalUncompressedBytes) || totalUncompressedBytes > limits.maxTotalUncompressedBytes) {
-          throw new Error("Backup zip total uncompressed size exceeds the configured limit.");
-        }
+        validateZipEntry(entry, validationState, limits);
         zip.readEntry();
       } catch (error) {
         finish(error);
@@ -209,6 +205,33 @@ export async function validateZipArchive(
     zip.on("end", () => finish());
     zip.on("error", finish);
   });
+}
+
+export function validateZipEntry(
+  entry: ZipEntryMetadata,
+  state: ZipValidationState,
+  limits: ZipLimits
+): void {
+  state.entryCount += 1;
+  if (state.entryCount > limits.maxEntries) {
+    throw new Error(`Backup zip entry count exceeds the limit of ${limits.maxEntries}.`);
+  }
+  if (!isSafeZipEntryName(entry.fileName)) {
+    throw new Error(`Unsafe zip entry path: ${entry.fileName}`);
+  }
+  if (!Number.isSafeInteger(entry.uncompressedSize) || entry.uncompressedSize < 0) {
+    throw new Error(`Backup zip entry has an invalid uncompressed size: ${entry.fileName}`);
+  }
+  if (entry.uncompressedSize > limits.maxEntryUncompressedBytes) {
+    throw new Error(`Backup zip single entry exceeds the uncompressed size limit: ${entry.fileName}`);
+  }
+  state.totalUncompressedBytes += entry.uncompressedSize;
+  if (
+    !Number.isSafeInteger(state.totalUncompressedBytes) ||
+    state.totalUncompressedBytes > limits.maxTotalUncompressedBytes
+  ) {
+    throw new Error("Backup zip total uncompressed size exceeds the configured limit.");
+  }
 }
 
 export function isSafeZipEntryName(entryName: string): boolean {

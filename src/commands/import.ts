@@ -142,7 +142,13 @@ export async function importCommand(
     spinner?.stop(t("import.restoreComplete"));
 
     if (options.json) {
-      printJson({ restored, manifest, rollback, codexAppSync });
+      printJson({
+        restored,
+        manifest,
+        rollback,
+        codexAppProjectCount: codexAppSync?.addedProjectCount ?? 0,
+        codexAppSync
+      });
       return;
     }
 

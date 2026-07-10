@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import fs from "fs-extra";
 import path from "node:path";
 import os from "node:os";
@@ -65,11 +65,21 @@ describe("Codex App project sync", () => {
       );
       await createZipFromDirectory(source, backup);
 
+      const output: string[] = [];
+      const outputSpy = vi.spyOn(console, "log").mockImplementation((value) => output.push(String(value)));
       await importCommand(
         { env: { homeDir: home, cwd: dir }, config: { version: "1.1", storage: { type: "local" }, cloud_sync: { enabled: false } } },
         backup,
-        { only: ["codex"], yes: true }
+        { only: ["codex"], yes: true, json: true }
       );
+      outputSpy.mockRestore();
+
+      const importResult = JSON.parse(output.at(-1) ?? "{}") as {
+        codexAppProjectCount?: number;
+        codexAppSync?: { addedProjectCount: number };
+      };
+      expect(importResult.codexAppProjectCount).toBe(2);
+      expect(importResult.codexAppSync?.addedProjectCount).toBe(2);
 
       const state = await fs.readJson(globalState);
       const persisted = state["electron-persisted-atom-state"];
@@ -215,6 +225,52 @@ describe("Codex App project sync", () => {
 
       expect(result.addedProjectCount).toBe(0);
       expect(result.sqlite).toEqual({ status: "failed", message: "sqlite unavailable" });
+    } finally {
+      await fs.remove(dir);
+    }
+  });
+
+  it("runs the catalog mutation as a fail-fast sqlite transaction", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "airelay-codex-catalog-transaction-"));
+    const home = path.join(dir, "home");
+    const stateDb = path.join(home, ".codex", "state_5.sqlite");
+    const catalogDb = path.join(home, ".codex", "sqlite", "codex-dev.db");
+    let mutationArgs: string[] | undefined;
+    const columns: Record<string, string[]> = {
+      threads: ["id", "title", "created_at", "updated_at", "cwd", "source", "model_provider", "git_branch", "archived", "preview"],
+      local_thread_catalog: ["host_id", "thread_id", "display_title", "source_created_at", "source_updated_at", "cwd", "source_kind", "source_detail", "model_provider", "git_branch", "observation_sequence", "missing_candidate"],
+      local_thread_catalog_hosts: ["host_id", "host_kind"],
+      local_thread_catalog_metadata: ["id", "catalog_revision"],
+      local_thread_catalog_sync_state: ["host_id", "watermark_updated_at", "initial_build_complete", "observation_sequence"]
+    };
+
+    try {
+      await fs.ensureDir(path.dirname(stateDb));
+      await fs.ensureDir(path.dirname(catalogDb));
+      await fs.writeFile(stateDb, "placeholder");
+      await fs.writeFile(catalogDb, "placeholder");
+
+      const result = await syncCodexAppProjects({ homeDir: home, cwd: dir }, {
+        executeFile: async (_file, args) => {
+          const sql = args.at(-1) ?? "";
+          const table = /table_info\('([^']+)'\)/.exec(sql)?.[1];
+          if (table) {
+            return {
+              stdout: (columns[table] ?? []).map((column, index) => `${index}|${column}|TEXT|0||0`).join("\n"),
+              stderr: ""
+            };
+          }
+          mutationArgs = args;
+          return { stdout: "", stderr: "" };
+        }
+      });
+
+      expect(result.sqlite.status).toBe("synced");
+      expect(mutationArgs?.[0]).toBe("-bail");
+      const mutationSql = mutationArgs?.at(-1) ?? "";
+      expect(mutationSql).toMatch(/BEGIN IMMEDIATE;/);
+      expect(mutationSql).toMatch(/COMMIT;/);
+      expect(mutationSql.indexOf("BEGIN IMMEDIATE;")).toBeLessThan(mutationSql.indexOf("INSERT OR REPLACE"));
     } finally {
       await fs.remove(dir);
     }

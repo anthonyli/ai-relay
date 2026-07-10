@@ -8,6 +8,7 @@ import {
   extractZip,
   isSafeZipEntryName,
   readZipText,
+  validateZipEntry,
   validateZipArchive
 } from "../src/archive/zip.js";
 
@@ -83,5 +84,18 @@ describe("archive flow", () => {
     expect(isSafeZipEntryName("/absolute.txt")).toBe(false);
     expect(isSafeZipEntryName("C:\\absolute.txt")).toBe(false);
     expect(isSafeZipEntryName("clients\\..\\outside.txt")).toBe(false);
+  });
+
+  it("applies zip limits incrementally to entries from the handle being extracted", () => {
+    const limits = {
+      maxEntries: 1,
+      maxEntryUncompressedBytes: 4,
+      maxTotalUncompressedBytes: 4
+    };
+    const state = { entryCount: 0, totalUncompressedBytes: 0 };
+
+    expect(() => validateZipEntry({ fileName: "one.txt", uncompressedSize: 4 }, state, limits)).not.toThrow();
+    expect(state).toEqual({ entryCount: 1, totalUncompressedBytes: 4 });
+    expect(() => validateZipEntry({ fileName: "two.txt", uncompressedSize: 0 }, state, limits)).toThrow(/entry count/i);
   });
 });

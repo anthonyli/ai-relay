@@ -120,6 +120,7 @@ async function syncLocalThreadCatalog(
 
     const sql = `
 ATTACH DATABASE '${escapeSqlString(stateDb)}' AS state;
+BEGIN IMMEDIATE;
 WITH source_threads AS (
   SELECT
     id,
@@ -178,10 +179,11 @@ ON CONFLICT(host_id) DO UPDATE SET
   watermark_updated_at = excluded.watermark_updated_at,
   initial_build_complete = 1,
   observation_sequence = excluded.observation_sequence;
+COMMIT;
 DETACH DATABASE state;
 `;
 
-    await executeFile("sqlite3", [catalogDb, sql]);
+    await executeFile("sqlite3", ["-bail", catalogDb, sql]);
     return { status: "synced" };
   } catch (error) {
     return { status: "failed", message: sqliteErrorMessage(error) };
