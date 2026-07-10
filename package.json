@@ -1,6 +1,6 @@
 {
   "name": "ai-relay-cli",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Universal backup, export, import, and restore for AI coding CLI sessions.",
   "type": "module",
   "repository": {
