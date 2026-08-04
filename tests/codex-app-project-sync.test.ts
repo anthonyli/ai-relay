@@ -86,7 +86,11 @@ describe("Codex App project sync", () => {
       expect(persisted["electron-saved-workspace-roots"]).toEqual(
         expect.arrayContaining([existingProject, restoredProject, missingProject])
       );
-      expect(persisted["project-order"]).toEqual(expect.arrayContaining([existingProject, restoredProject, missingProject]));
+      const localProjects = state["local-projects"] as Record<string, { id: string; rootPaths: string[] }>;
+      const projectRoots = Object.values(localProjects).flatMap((project) => project.rootPaths);
+      expect(projectRoots).toEqual(expect.arrayContaining([restoredProject, missingProject]));
+      expect(state["project-order"]).toEqual(expect.arrayContaining(Object.keys(localProjects)));
+      expect(persisted["project-order"]).toEqual(state["project-order"]);
       expect(persisted[`sidebar-project-expanded-v1-codex:${existingProject}`]).toBeUndefined();
       expect(persisted[`sidebar-project-expanded-v1-codex:${restoredProject}`]).toBe(false);
       expect(persisted[`sidebar-project-expanded-v1-codex:${missingProject}`]).toBe(false);
@@ -280,11 +284,16 @@ describe("Codex App project sync", () => {
 
       const stateRow = execFileSync("sqlite3", [
         stateDb,
+<<<<<<< Updated upstream
         "SELECT title, cwd, preview FROM threads WHERE id = 'thread-from-session';"
+=======
+        "SELECT title, cwd, preview, source, thread_source FROM threads WHERE id = 'thread-from-session';"
+>>>>>>> Stashed changes
       ]).toString().trim();
       const stateCount = execFileSync("sqlite3", [stateDb, "SELECT COUNT(*) FROM threads;"]).toString().trim();
       const catalogRow = execFileSync("sqlite3", [
         catalogDb,
+<<<<<<< Updated upstream
         "SELECT display_title, cwd FROM local_thread_catalog WHERE thread_id = 'thread-from-session';"
       ]).toString().trim();
       const state = await fs.readJson(path.join(codexRoot, ".codex-global-state.json"));
@@ -294,6 +303,23 @@ describe("Codex App project sync", () => {
       expect(stateCount).toBe("1");
       expect(catalogRow).toBe(`Saved session title|${project}`);
       expect(persisted["electron-saved-workspace-roots"]).toEqual([project]);
+=======
+        "SELECT display_title, cwd, source_kind FROM local_thread_catalog WHERE thread_id = 'thread-from-session';"
+      ]).toString().trim();
+      const state = await fs.readJson(path.join(codexRoot, ".codex-global-state.json"));
+      const persisted = state["electron-persisted-atom-state"] as Record<string, unknown>;
+      const localProjects = state["local-projects"] as Record<string, { id: string; rootPaths: string[] }>;
+      const importedProject = Object.values(localProjects).find((value) => value.rootPaths.includes(project));
+      const assignments = state["thread-project-assignments"] as Record<string, { projectId: string; projectKind: string }>;
+
+      expect(stateRow).toBe(`Saved session title|${project}|Saved session title|cli|ai-relay-import`);
+      expect(stateCount).toBe("1");
+      expect(catalogRow).toBe(`Saved session title|${project}|cli`);
+      expect(persisted["electron-saved-workspace-roots"]).toEqual([project]);
+      expect(importedProject).toBeDefined();
+      expect(assignments["thread-from-session"]).toMatchObject({ projectKind: "local", projectId: importedProject?.id });
+      expect(state["project-order"]).toContain(importedProject?.id);
+>>>>>>> Stashed changes
       expect(result).toMatchObject({ addedProjectCount: 1, sqlite: { status: "synced" } });
     } finally {
       await fs.remove(dir);

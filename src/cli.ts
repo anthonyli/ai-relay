@@ -9,6 +9,7 @@ import { exportCommand } from "./commands/export.js";
 import { importCommand } from "./commands/import.js";
 import { inspectCommand } from "./commands/inspect.js";
 import { listCommand } from "./commands/list.js";
+import { repairCommand } from "./commands/repair.js";
 import { rollbackCommand } from "./commands/rollback.js";
 import { syncCommand } from "./commands/sync.js";
 import type { CommandContext } from "./commands/context.js";
@@ -106,6 +107,12 @@ export function createCli(dependencies: CliDependencies = {}): Command {
     .argument("<backup>", "backup zip file")
     .option("--json", "print JSON output")
     .action((backup, options) => run((ctx) => inspectCommand(ctx, backup, options))());
+
+  program
+    .command("repair")
+    .description("Rebuild Codex App projects and task indexes from local session files.")
+    .option("--json", "print JSON output")
+    .action((options) => run((ctx) => repairCommand(ctx, options))());
 
   program
     .command("ls")

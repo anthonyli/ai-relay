@@ -1,4 +1,5 @@
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import fs from "fs-extra";
@@ -8,6 +9,8 @@ const execFileAsync = promisify(execFile);
 const PERSISTED_STATE_KEY = "electron-persisted-atom-state";
 const SAVED_WORKSPACE_ROOTS_KEY = "electron-saved-workspace-roots";
 const PROJECT_ORDER_KEY = "project-order";
+const LOCAL_PROJECTS_KEY = "local-projects";
+const THREAD_PROJECT_ASSIGNMENTS_KEY = "thread-project-assignments";
 const SIDEBAR_PROJECT_KEY_PREFIX = "sidebar-project-expanded-v1-codex:";
 
 interface ExecuteFileResult {
@@ -36,6 +39,23 @@ interface SqliteColumn {
   defaultValue: string | null;
 }
 
+<<<<<<< Updated upstream
+=======
+interface LocalProject {
+  id: string;
+  name: string;
+  rootPaths: string[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+interface ProjectSyncData {
+  projects: Record<string, LocalProject>;
+  assignments: Record<string, { projectKind: "local"; projectId: string; pendingCoreUpdate: false }>;
+  order: string[];
+}
+
+>>>>>>> Stashed changes
 export interface CodexAppSyncResult {
   addedProjectCount: number;
   sqlite: {
@@ -70,12 +90,31 @@ export async function syncCodexAppProjects(
   const persisted = ensureRecord(state[PERSISTED_STATE_KEY]);
   state[PERSISTED_STATE_KEY] = persisted;
 
+  const existingLocalProjects = ensureRecord(state[LOCAL_PROJECTS_KEY]);
+  const existingAssignments = ensureRecord(state[THREAD_PROJECT_ASSIGNMENTS_KEY]);
+  const existingProjectOrder = appendUnique(
+    toStringArray(state[PROJECT_ORDER_KEY]),
+    toStringArray(persisted[PROJECT_ORDER_KEY])
+  );
+  const projectSync = buildProjectSync({
+    projectRoots,
+    threads: restoredThreads,
+    existingProjects: existingLocalProjects,
+    existingAssignments,
+    existingOrder: existingProjectOrder
+  });
+  const projectStateChanged = !sameJson(existingLocalProjects, projectSync.projects)
+    || !sameJson(existingAssignments, projectSync.assignments)
+    || !sameJson(toStringArray(state[PROJECT_ORDER_KEY]), projectSync.order);
+  state[LOCAL_PROJECTS_KEY] = projectSync.projects;
+  state[THREAD_PROJECT_ASSIGNMENTS_KEY] = projectSync.assignments;
+  state[PROJECT_ORDER_KEY] = projectSync.order;
+
   const existingSavedRoots = toStringArray(persisted[SAVED_WORKSPACE_ROOTS_KEY]);
-  const existingProjectOrder = toStringArray(persisted[PROJECT_ORDER_KEY]);
   const nextSavedRoots = appendUnique(existingSavedRoots, projectRoots);
-  const nextProjectOrder = appendUnique(existingProjectOrder, projectRoots);
+  const nextProjectOrder = projectSync.order;
   const added = nextSavedRoots.length - existingSavedRoots.length;
-  let changed = added > 0 || nextProjectOrder.length !== existingProjectOrder.length;
+  let changed = projectStateChanged || added > 0 || !sameJson(toStringArray(persisted[PROJECT_ORDER_KEY]), nextProjectOrder);
 
   for (const projectRoot of projectRoots) {
     const key = `${SIDEBAR_PROJECT_KEY_PREFIX}${projectRoot}`;
@@ -96,6 +135,85 @@ export async function syncCodexAppProjects(
   return { addedProjectCount: added, sqlite };
 }
 
+<<<<<<< Updated upstream
+=======
+function buildProjectSync({
+  projectRoots,
+  threads,
+  existingProjects,
+  existingAssignments,
+  existingOrder
+}: {
+  projectRoots: string[];
+  threads: RestoredThread[];
+  existingProjects: Record<string, unknown>;
+  existingAssignments: Record<string, unknown>;
+  existingOrder: string[];
+}): ProjectSyncData {
+  const projects: Record<string, LocalProject> = {};
+  const projectIdByRoot = new Map<string, string>();
+
+  for (const [projectId, value] of Object.entries(existingProjects)) {
+    const project = parseLocalProject(projectId, value);
+    if (!project) {
+      continue;
+    }
+    projects[project.id] = project;
+    for (const rootPath of project.rootPaths) {
+      projectIdByRoot.set(rootPath, project.id);
+    }
+  }
+
+  const now = Date.now();
+  for (const rootPath of projectRoots) {
+    if (projectIdByRoot.has(rootPath)) {
+      continue;
+    }
+    const id = localProjectId(rootPath);
+    projects[id] = {
+      id,
+      name: path.basename(rootPath) || rootPath,
+      rootPaths: [rootPath],
+      createdAt: now,
+      updatedAt: now
+    };
+    projectIdByRoot.set(rootPath, id);
+  }
+
+  const assignments = { ...existingAssignments } as ProjectSyncData["assignments"];
+  for (const thread of threads) {
+    const projectId = projectIdByRoot.get(thread.cwd);
+    if (projectId) {
+      assignments[thread.id] = { projectKind: "local", projectId, pendingCoreUpdate: false };
+    }
+  }
+
+  const order = appendUnique(existingOrder.filter((projectId) => projectId in projects), Object.keys(projects));
+  return { projects, assignments, order };
+}
+
+function parseLocalProject(projectId: string, value: unknown): LocalProject | undefined {
+  if (!isRecord(value) || typeof value.name !== "string" || !Array.isArray(value.rootPaths)) {
+    return undefined;
+  }
+  const rootPaths = value.rootPaths.filter((rootPath): rootPath is string => typeof rootPath === "string");
+  if (rootPaths.length === 0) {
+    return undefined;
+  }
+  const createdAt = typeof value.createdAt === "number" ? value.createdAt : Date.now();
+  const updatedAt = typeof value.updatedAt === "number" ? value.updatedAt : createdAt;
+  return { id: projectId, name: value.name, rootPaths, createdAt, updatedAt };
+}
+
+function localProjectId(rootPath: string): string {
+  return `ai-relay-${createHash("sha256").update(rootPath).digest("hex").slice(0, 16)}`;
+}
+
+function sameJson(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+>>>>>>> Stashed changes
 async function collectRestoredThreads(sessionsRoot: string, indexedThreadNames: Map<string, string>): Promise<RestoredThread[]> {
   const threads = new Map<string, RestoredThread>();
   for (const file of await walkFiles(sessionsRoot)) {
@@ -450,7 +568,11 @@ function buildLegacyImportCleanupSql(columns: SqliteColumn[], sessionsRoot: stri
   const statements = ["DELETE FROM state.threads WHERE source = 'ai-relay';"];
   if (columns.some((column) => column.name === "thread_source")) {
     statements.push(
+<<<<<<< Updated upstream
       `DELETE FROM state.threads WHERE source = 'cli' AND thread_source = 'user' AND rollout_path LIKE '${escapeSqlString(`${sessionsRoot}/%`)}';`
+=======
+      `DELETE FROM state.threads WHERE source = 'cli' AND thread_source IN ('user', 'ai-relay-import') AND rollout_path LIKE '${escapeSqlString(`${sessionsRoot}/%`)}';`
+>>>>>>> Stashed changes
     );
   }
   return statements.join("\n");
@@ -465,7 +587,11 @@ function buildThreadInsertSql(threads: RestoredThread[], columns: SqliteColumn[]
     rollout_path: (thread) => thread.rolloutPath,
     created_at: (thread) => thread.createdAt,
     updated_at: (thread) => thread.updatedAt,
+<<<<<<< Updated upstream
     source: () => "ai-relay",
+=======
+    source: () => "cli",
+>>>>>>> Stashed changes
     model_provider: () => "openai",
     cwd: (thread) => thread.cwd,
     title: (thread) => thread.title,

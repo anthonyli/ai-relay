@@ -48,6 +48,7 @@ const translations = {
     "import.mapHint": "If project paths changed between machines, re-run import with --map-path old=new.",
     "import.noMatchingClients": "No matching supported clients found in backup.",
     "import.clientMissing": "{client} not found in backup. Skipping.",
+    "repair.codexAppSynced": "Codex App project and task index rebuilt (projects added: {count}).",
 
     "inspect.backupVersion": "Backup Version: {version}",
     "inspect.created": "Created: {created}",
@@ -135,6 +136,7 @@ const translations = {
     "import.mapHint": "如果两台机器的项目路径不同，请使用 --map-path old=new 重新执行导入。",
     "import.noMatchingClients": "备份中没有匹配的受支持客户端。",
     "import.clientMissing": "备份中未找到 {client}，已跳过。",
+    "repair.codexAppSynced": "已重建 Codex App 项目与任务索引（新增项目：{count}）。",
 
     "inspect.backupVersion": "备份版本：{version}",
     "inspect.created": "创建时间：{created}",
