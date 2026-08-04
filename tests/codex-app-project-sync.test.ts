@@ -173,6 +173,133 @@ describe("Codex App project sync", () => {
     }
   });
 
+  it("rebuilds Codex App threads and catalog entries from restored session JSONL files", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "airelay-codex-session-rebuild-"));
+    const home = path.join(dir, "home");
+    const codexRoot = path.join(home, ".codex");
+    const stateDb = path.join(codexRoot, "state_5.sqlite");
+    const catalogDb = path.join(codexRoot, "sqlite", "codex-dev.db");
+    const sessionIndexPath = path.join(codexRoot, "session_index.jsonl");
+    const sessionPath = path.join(codexRoot, "sessions", "2026", "07", "08", "restored.jsonl");
+    const unindexedSessionPath = path.join(codexRoot, "sessions", "2026", "07", "08", "unindexed.jsonl");
+    const project = path.join(dir, "project");
+
+    try {
+      await fs.ensureDir(path.dirname(catalogDb));
+      await fs.ensureDir(path.dirname(sessionPath));
+      await fs.writeFile(
+        sessionPath,
+        [
+          JSON.stringify({
+            type: "session_meta",
+            timestamp: "2026-07-08T09:00:00.000Z",
+            payload: {
+              id: "thread-from-session",
+              cwd: project,
+              timestamp: "2026-07-08T09:00:00.000Z",
+              cli_version: "1.0.0",
+              git: { branch: "main" }
+            }
+          }),
+          JSON.stringify({
+            type: "response_item",
+            timestamp: "2026-07-08T09:01:00.000Z",
+            payload: {
+              type: "message",
+              role: "user",
+              content: [{ type: "input_text", text: "<recommended_plugins> not a task title" }]
+            }
+          })
+        ].join("\n") + "\n"
+      );
+      await fs.writeFile(
+        unindexedSessionPath,
+        JSON.stringify({
+          type: "session_meta",
+          timestamp: "2026-07-08T09:02:00.000Z",
+          payload: { id: "not-in-index", cwd: project, timestamp: "2026-07-08T09:02:00.000Z" }
+        }) + "\n"
+      );
+      await fs.writeFile(
+        sessionIndexPath,
+        JSON.stringify({ id: "thread-from-session", thread_name: "Saved session title", updated_at: 1 }) + "\n"
+      );
+      execFileSync("sqlite3", [
+        stateDb,
+        `CREATE TABLE threads (
+          id TEXT PRIMARY KEY,
+          rollout_path TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          source TEXT NOT NULL,
+          model_provider TEXT NOT NULL,
+          cwd TEXT NOT NULL,
+          title TEXT NOT NULL,
+          archived INTEGER NOT NULL DEFAULT 0,
+          git_branch TEXT,
+          preview TEXT NOT NULL DEFAULT '',
+          thread_source TEXT
+        );
+        INSERT INTO threads (id, rollout_path, created_at, updated_at, source, model_provider, cwd, title, archived, preview, thread_source)
+        VALUES ('legacy-bad-import', '${unindexedSessionPath}', 1, 1, 'cli', 'openai', '${project}', '<recommended_plugins> not a task title', 0, '<recommended_plugins> not a task title', 'user');`
+      ]);
+      execFileSync("sqlite3", [
+        catalogDb,
+        `CREATE TABLE local_thread_catalog (
+          host_id TEXT NOT NULL,
+          thread_id TEXT NOT NULL,
+          display_title TEXT NOT NULL,
+          source_created_at REAL NOT NULL,
+          source_updated_at REAL NOT NULL,
+          cwd TEXT NOT NULL,
+          source_kind TEXT NOT NULL,
+          source_detail TEXT,
+          model_provider TEXT NOT NULL,
+          git_branch TEXT,
+          observation_sequence INTEGER NOT NULL,
+          missing_candidate INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY(host_id, thread_id)
+        );
+        CREATE TABLE local_thread_catalog_hosts (
+          host_id TEXT PRIMARY KEY,
+          host_kind TEXT NOT NULL
+        );
+        CREATE TABLE local_thread_catalog_metadata (
+          id INTEGER PRIMARY KEY,
+          catalog_revision INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE local_thread_catalog_sync_state (
+          host_id TEXT PRIMARY KEY,
+          watermark_updated_at REAL,
+          initial_build_complete INTEGER NOT NULL DEFAULT 0,
+          observation_sequence INTEGER NOT NULL DEFAULT 0
+        );`
+      ]);
+
+      const result = await syncCodexAppProjects({ homeDir: home, cwd: dir });
+
+      const stateRow = execFileSync("sqlite3", [
+        stateDb,
+        "SELECT title, cwd, preview FROM threads WHERE id = 'thread-from-session';"
+      ]).toString().trim();
+      const stateCount = execFileSync("sqlite3", [stateDb, "SELECT COUNT(*) FROM threads;"]).toString().trim();
+      const catalogRow = execFileSync("sqlite3", [
+        catalogDb,
+        "SELECT display_title, cwd FROM local_thread_catalog WHERE thread_id = 'thread-from-session';"
+      ]).toString().trim();
+      const state = await fs.readJson(path.join(codexRoot, ".codex-global-state.json"));
+      const persisted = state["electron-persisted-atom-state"] as Record<string, unknown>;
+
+      expect(stateRow).toBe(`Saved session title|${project}|Saved session title`);
+      expect(stateCount).toBe("1");
+      expect(catalogRow).toBe(`Saved session title|${project}`);
+      expect(persisted["electron-saved-workspace-roots"]).toEqual([project]);
+      expect(result).toMatchObject({ addedProjectCount: 1, sqlite: { status: "synced" } });
+    } finally {
+      await fs.remove(dir);
+    }
+  });
+
   it("reports when Codex App sqlite databases are not present", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "airelay-codex-catalog-missing-"));
     try {

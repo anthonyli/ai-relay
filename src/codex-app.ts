@@ -17,6 +17,25 @@ interface ExecuteFileResult {
 
 type ExecuteFile = (file: string, args: string[]) => Promise<ExecuteFileResult>;
 
+interface RestoredThread {
+  id: string;
+  rolloutPath: string;
+  createdAt: number;
+  updatedAt: number;
+  cwd: string;
+  title: string;
+  preview: string;
+  firstUserMessage: string;
+  cliVersion?: string;
+  gitBranch?: string;
+}
+
+interface SqliteColumn {
+  name: string;
+  notNull: boolean;
+  defaultValue: string | null;
+}
+
 export interface CodexAppSyncResult {
   addedProjectCount: number;
   sqlite: {
@@ -38,8 +57,11 @@ export async function syncCodexAppProjects(
   const globalStatePath = path.join(codexRoot, ".codex-global-state.json");
   const executeFile = dependencies.executeFile ?? defaultExecuteFile;
 
-  const projectRoots = (await fs.pathExists(sessionsRoot)) ? await collectSessionProjectRoots(sessionsRoot) : [];
-  const sqlite = await syncLocalThreadCatalog(codexRoot, executeFile);
+  const hasSessions = await fs.pathExists(sessionsRoot);
+  const indexedThreadNames = await readSessionIndex(path.join(codexRoot, "session_index.jsonl"));
+  const restoredThreads = hasSessions ? await collectRestoredThreads(sessionsRoot, indexedThreadNames) : [];
+  const projectRoots = hasSessions ? await collectSessionProjectRoots(sessionsRoot) : [];
+  const sqlite = await syncLocalThreadCatalog(codexRoot, sessionsRoot, restoredThreads, executeFile);
   if (projectRoots.length === 0) {
     return { addedProjectCount: 0, sqlite };
   }
@@ -74,6 +96,21 @@ export async function syncCodexAppProjects(
   return { addedProjectCount: added, sqlite };
 }
 
+async function collectRestoredThreads(sessionsRoot: string, indexedThreadNames: Map<string, string>): Promise<RestoredThread[]> {
+  const threads = new Map<string, RestoredThread>();
+  for (const file of await walkFiles(sessionsRoot)) {
+    const thread = await readRestoredThread(file, indexedThreadNames);
+    if (!thread || !path.isAbsolute(thread.cwd)) {
+      continue;
+    }
+    const existing = threads.get(thread.id);
+    if (!existing || existing.updatedAt < thread.updatedAt) {
+      threads.set(thread.id, thread);
+    }
+  }
+  return [...threads.values()];
+}
+
 async function collectSessionProjectRoots(sessionsRoot: string): Promise<string[]> {
   const roots: string[] = [];
   for (const file of await walkFiles(sessionsRoot)) {
@@ -88,6 +125,8 @@ async function collectSessionProjectRoots(sessionsRoot: string): Promise<string[
 
 async function syncLocalThreadCatalog(
   codexRoot: string,
+  sessionsRoot: string,
+  restoredThreads: RestoredThread[],
   executeFile: ExecuteFile
 ): Promise<CodexAppSyncResult["sqlite"]> {
   const stateDb = path.join(codexRoot, "state_5.sqlite");
@@ -97,19 +136,20 @@ async function syncLocalThreadCatalog(
   }
 
   try {
+    const stateColumns = await tableColumns(executeFile, stateDb, "threads");
     const missingSchema = [
-      ...(await missingColumns(executeFile, stateDb, "threads", [
+      ...missingColumns(stateColumns, "threads", [
         "id", "title", "created_at", "updated_at", "cwd", "source", "model_provider", "git_branch", "archived", "preview"
-      ])),
-      ...(await missingColumns(executeFile, catalogDb, "local_thread_catalog", [
+      ]),
+      ...missingColumns(await tableColumns(executeFile, catalogDb, "local_thread_catalog"), "local_thread_catalog", [
         "host_id", "thread_id", "display_title", "source_created_at", "source_updated_at", "cwd", "source_kind",
         "source_detail", "model_provider", "git_branch", "observation_sequence", "missing_candidate"
-      ])),
-      ...(await missingColumns(executeFile, catalogDb, "local_thread_catalog_hosts", ["host_id", "host_kind"])),
-      ...(await missingColumns(executeFile, catalogDb, "local_thread_catalog_metadata", ["id", "catalog_revision"])),
-      ...(await missingColumns(executeFile, catalogDb, "local_thread_catalog_sync_state", [
+      ]),
+      ...missingColumns(await tableColumns(executeFile, catalogDb, "local_thread_catalog_hosts"), "local_thread_catalog_hosts", ["host_id", "host_kind"]),
+      ...missingColumns(await tableColumns(executeFile, catalogDb, "local_thread_catalog_metadata"), "local_thread_catalog_metadata", ["id", "catalog_revision"]),
+      ...missingColumns(await tableColumns(executeFile, catalogDb, "local_thread_catalog_sync_state"), "local_thread_catalog_sync_state", [
         "host_id", "watermark_updated_at", "initial_build_complete", "observation_sequence"
-      ]))
+      ])
     ];
     if (missingSchema.length > 0) {
       return {
@@ -121,6 +161,11 @@ async function syncLocalThreadCatalog(
     const sql = `
 ATTACH DATABASE '${escapeSqlString(stateDb)}' AS state;
 BEGIN IMMEDIATE;
+${buildLegacyImportCleanupSql(stateColumns, sessionsRoot)}
+${buildThreadInsertSql(restoredThreads, stateColumns)}
+DELETE FROM local_thread_catalog
+WHERE host_id = 'local'
+  AND thread_id NOT IN (SELECT id FROM state.threads);
 WITH source_threads AS (
   SELECT
     id,
@@ -190,23 +235,27 @@ DETACH DATABASE state;
   }
 }
 
-async function missingColumns(
+async function tableColumns(
   executeFile: ExecuteFile,
   database: string,
-  table: string,
-  requiredColumns: string[]
-): Promise<string[]> {
+  table: string
+): Promise<SqliteColumn[]> {
   const result = await executeFile("sqlite3", [database, `PRAGMA table_info('${escapeSqlString(table)}');`]);
-  const actualColumns = new Set(
-    result.stdout
-      .split(/\r?\n/)
-      .filter(Boolean)
-      .map((line) => line.split("|")[1])
-      .filter((column): column is string => Boolean(column))
-  );
-  if (actualColumns.size === 0) {
+  return result.stdout
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => {
+      const [, name, , notNull, defaultValue] = line.split("|");
+      return { name: name ?? "", notNull: notNull === "1", defaultValue: defaultValue || null };
+    })
+    .filter((column) => Boolean(column.name));
+}
+
+function missingColumns(columns: SqliteColumn[], table: string, requiredColumns: string[]): string[] {
+  if (columns.length === 0) {
     return [`${table} table`];
   }
+  const actualColumns = new Set(columns.map((column) => column.name));
   return requiredColumns.filter((column) => !actualColumns.has(column)).map((column) => `${table}.${column}`);
 }
 
@@ -227,14 +276,85 @@ function escapeSqlString(value: string): string {
   return value.replace(/'/g, "''");
 }
 
+async function readRestoredThread(file: string, indexedThreadNames: Map<string, string>): Promise<RestoredThread | undefined> {
+  const content = await fs.readFile(file, "utf8");
+  const stat = await fs.stat(file);
+  let id: string | undefined;
+  let cwd: string | undefined;
+  let createdAt: number | undefined;
+  let updatedAt: number | undefined;
+  let cliVersion: string | undefined;
+  let gitBranch: string | undefined;
+  let firstUserMessage: string | undefined;
+
+  for (const line of content.split("\n")) {
+    if (!line.trim()) {
+      continue;
+    }
+    const parsed = parseJsonLine(line);
+    const timestamp = timestampSeconds(isRecord(parsed) ? parsed.timestamp : undefined);
+    if (timestamp) {
+      createdAt = Math.min(createdAt ?? timestamp, timestamp);
+      updatedAt = Math.max(updatedAt ?? timestamp, timestamp);
+    }
+    if (!isRecord(parsed)) {
+      continue;
+    }
+    if (parsed.type === "session_meta" && isRecord(parsed.payload)) {
+      const payload = parsed.payload;
+      if (typeof payload.id === "string") {
+        id = payload.id;
+      }
+      if (typeof payload.cwd === "string") {
+        cwd = payload.cwd;
+      }
+      if (typeof payload.cli_version === "string") {
+        cliVersion = payload.cli_version;
+      }
+      if (isRecord(payload.git) && typeof payload.git.branch === "string") {
+        gitBranch = payload.git.branch;
+      }
+      const payloadTimestamp = timestampSeconds(payload.timestamp);
+      if (payloadTimestamp) {
+        createdAt = Math.min(createdAt ?? payloadTimestamp, payloadTimestamp);
+        updatedAt = Math.max(updatedAt ?? payloadTimestamp, payloadTimestamp);
+      }
+    }
+    if (!firstUserMessage) {
+      firstUserMessage = findUserMessage(parsed);
+    }
+  }
+
+  if (!id || !cwd) {
+    return undefined;
+  }
+  const indexedTitle = indexedThreadNames.get(id);
+  if (indexedThreadNames.size > 0 && !indexedTitle) {
+    return undefined;
+  }
+  const fallback = Math.max(1, Math.floor(stat.mtimeMs / 1000));
+  const title = titleFromMessage(indexedTitle ?? firstUserMessage);
+  return {
+    id,
+    rolloutPath: file,
+    createdAt: createdAt ?? fallback,
+    updatedAt: updatedAt ?? fallback,
+    cwd,
+    title,
+    preview: title,
+    firstUserMessage: firstUserMessage ?? "",
+    cliVersion,
+    gitBranch
+  };
+}
+
 async function readSessionCwd(file: string): Promise<string | undefined> {
   const content = await fs.readFile(file, "utf8");
   for (const line of content.split("\n")) {
     if (!line.trim()) {
       continue;
     }
-    const parsed = parseJsonLine(line);
-    const cwd = findCwd(parsed);
+    const cwd = findCwd(parseJsonLine(line));
     if (cwd) {
       return cwd;
     }
@@ -248,6 +368,29 @@ function parseJsonLine(line: string): unknown {
   } catch {
     return undefined;
   }
+}
+
+function findUserMessage(value: Record<string, unknown>): string | undefined {
+  if (value.type !== "response_item" || !isRecord(value.payload) || value.payload.role !== "user") {
+    return undefined;
+  }
+  const content = value.payload.content;
+  if (typeof content === "string") {
+    return isInjectedMessage(content) ? undefined : content;
+  }
+  if (!Array.isArray(content)) {
+    return undefined;
+  }
+  for (const item of content) {
+    if (isRecord(item) && typeof item.text === "string") {
+      return isInjectedMessage(item.text) ? undefined : item.text;
+    }
+  }
+  return undefined;
+}
+
+function isInjectedMessage(value: string): boolean {
+  return /^\s*<(recommended_plugins|environment_context|permissions instructions|app-context)>/i.test(value);
 }
 
 function findCwd(value: unknown): string | undefined {
@@ -264,6 +407,98 @@ function findCwd(value: unknown): string | undefined {
     return value.item.payload.cwd;
   }
   return undefined;
+}
+
+function timestampSeconds(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.max(1, Math.floor(value > 10_000_000_000 ? value / 1000 : value));
+  }
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed)) {
+      return Math.max(1, Math.floor(parsed / 1000));
+    }
+  }
+  return undefined;
+}
+
+function titleFromMessage(message: string | undefined): string {
+  const normalized = (message ?? "").replace(/\s+/g, " ").trim();
+  return normalized.slice(0, 120) || "Imported Codex session";
+}
+
+async function readSessionIndex(file: string): Promise<Map<string, string>> {
+  if (!(await fs.pathExists(file))) {
+    return new Map();
+  }
+  const entries = new Map<string, string>();
+  const content = await fs.readFile(file, "utf8");
+  for (const line of content.split("\n")) {
+    const parsed = parseJsonLine(line);
+    if (!isRecord(parsed) || typeof parsed.id !== "string" || typeof parsed.thread_name !== "string") {
+      continue;
+    }
+    const title = parsed.thread_name.trim();
+    if (title) {
+      entries.set(parsed.id, title);
+    }
+  }
+  return entries;
+}
+
+function buildLegacyImportCleanupSql(columns: SqliteColumn[], sessionsRoot: string): string {
+  const statements = ["DELETE FROM state.threads WHERE source = 'ai-relay';"];
+  if (columns.some((column) => column.name === "thread_source")) {
+    statements.push(
+      `DELETE FROM state.threads WHERE source = 'cli' AND thread_source = 'user' AND rollout_path LIKE '${escapeSqlString(`${sessionsRoot}/%`)}';`
+    );
+  }
+  return statements.join("\n");
+}
+
+function buildThreadInsertSql(threads: RestoredThread[], columns: SqliteColumn[]): string {
+  if (threads.length === 0) {
+    return "";
+  }
+  const valuesByColumn: Record<string, (thread: RestoredThread) => string | number | null> = {
+    id: (thread) => thread.id,
+    rollout_path: (thread) => thread.rolloutPath,
+    created_at: (thread) => thread.createdAt,
+    updated_at: (thread) => thread.updatedAt,
+    source: () => "ai-relay",
+    model_provider: () => "openai",
+    cwd: (thread) => thread.cwd,
+    title: (thread) => thread.title,
+    sandbox_policy: () => "{}",
+    approval_mode: () => "on-request",
+    has_user_event: () => 1,
+    archived: () => 0,
+    git_branch: (thread) => thread.gitBranch ?? null,
+    preview: (thread) => thread.preview,
+    cli_version: (thread) => thread.cliVersion ?? "",
+    first_user_message: (thread) => thread.firstUserMessage,
+    memory_mode: () => "enabled",
+    thread_source: () => "ai-relay-import",
+    recency_at: (thread) => thread.updatedAt,
+    recency_at_ms: (thread) => thread.updatedAt * 1000,
+    history_mode: () => "legacy",
+    name: (thread) => thread.title,
+    is_pinned: () => 0
+  };
+  const missingRequired = columns.filter((column) => column.notNull && column.defaultValue === null && !(column.name in valuesByColumn));
+  if (missingRequired.length > 0) {
+    throw new Error(`Codex App threads schema has unsupported required columns: ${missingRequired.map((column) => column.name).join(", ")}`);
+  }
+  const insertColumns = columns.map((column) => column.name).filter((column) => column in valuesByColumn);
+  const rows = threads.map((thread) => `(${insertColumns.map((column) => sqlValue(valuesByColumn[column]!(thread))).join(", ")})`);
+  return `INSERT OR IGNORE INTO state.threads (${insertColumns.join(", ")}) VALUES\n${rows.join(",\n")};`;
+}
+
+function sqlValue(value: string | number | null): string {
+  if (value === null) {
+    return "NULL";
+  }
+  return typeof value === "number" ? String(value) : `'${escapeSqlString(value)}'`;
 }
 
 async function readCodexGlobalState(globalStatePath: string): Promise<Record<string, unknown>> {
