@@ -186,6 +186,8 @@ describe("Codex App project sync", () => {
     const sessionIndexPath = path.join(codexRoot, "session_index.jsonl");
     const sessionPath = path.join(codexRoot, "sessions", "2026", "07", "08", "restored.jsonl");
     const unindexedSessionPath = path.join(codexRoot, "sessions", "2026", "07", "08", "unindexed.jsonl");
+    const subagentSessionPath = path.join(codexRoot, "sessions", "2026", "07", "08", "subagent.jsonl");
+    const existingSessionPath = path.join(codexRoot, "sessions", "2026", "07", "08", "existing.jsonl");
     const project = path.join(dir, "project");
 
     try {
@@ -225,6 +227,34 @@ describe("Codex App project sync", () => {
         }) + "\n"
       );
       await fs.writeFile(
+        subagentSessionPath,
+        [
+          JSON.stringify({
+            type: "session_meta",
+            timestamp: "2026-07-08T09:03:00.000Z",
+            payload: { id: "subagent-thread", cwd: project, timestamp: "2026-07-08T09:03:00.000Z" }
+          }),
+          JSON.stringify({
+            type: "session_meta",
+            timestamp: "2026-07-08T09:04:00.000Z",
+            payload: { id: "embedded-parent-thread", cwd: project, timestamp: "2026-07-08T09:04:00.000Z" }
+          })
+        ].join("\n") + "\n"
+      );
+      await fs.writeFile(
+        existingSessionPath,
+        JSON.stringify({
+          type: "session_meta",
+          timestamp: "2026-07-08T09:05:00.000Z",
+          payload: {
+            id: "existing-thread",
+            cwd: project,
+            timestamp: "2026-07-08T09:05:00.000Z",
+            history_mode: "paginated"
+          }
+        }) + "\n"
+      );
+      await fs.writeFile(
         sessionIndexPath,
         JSON.stringify({ id: "thread-from-session", thread_name: "Saved session title", updated_at: 1 }) + "\n"
       );
@@ -242,10 +272,13 @@ describe("Codex App project sync", () => {
           archived INTEGER NOT NULL DEFAULT 0,
           git_branch TEXT,
           preview TEXT NOT NULL DEFAULT '',
-          thread_source TEXT
+          thread_source TEXT,
+          history_mode TEXT
         );
         INSERT INTO threads (id, rollout_path, created_at, updated_at, source, model_provider, cwd, title, archived, preview, thread_source)
-        VALUES ('legacy-bad-import', '${unindexedSessionPath}', 1, 1, 'cli', 'openai', '${project}', '<recommended_plugins> not a task title', 0, '<recommended_plugins> not a task title', 'user');`
+        VALUES ('legacy-bad-import', '${unindexedSessionPath}', 1, 1, 'cli', 'openai', '${project}', '<recommended_plugins> not a task title', 0, '<recommended_plugins> not a task title', 'user');
+        INSERT INTO threads (id, rollout_path, created_at, updated_at, source, model_provider, cwd, title, archived, preview, thread_source, history_mode)
+        VALUES ('existing-thread', '${existingSessionPath}', 1, 1, 'vscode', 'openai', '${project}', 'App owned title', 0, 'App owned title', 'user', 'legacy');`
       ]);
       execFileSync("sqlite3", [
         catalogDb,
@@ -284,27 +317,24 @@ describe("Codex App project sync", () => {
 
       const stateRow = execFileSync("sqlite3", [
         stateDb,
-<<<<<<< Updated upstream
-        "SELECT title, cwd, preview FROM threads WHERE id = 'thread-from-session';"
-=======
         "SELECT title, cwd, preview, source, thread_source FROM threads WHERE id = 'thread-from-session';"
->>>>>>> Stashed changes
       ]).toString().trim();
       const stateCount = execFileSync("sqlite3", [stateDb, "SELECT COUNT(*) FROM threads;"]).toString().trim();
       const catalogRow = execFileSync("sqlite3", [
         catalogDb,
-<<<<<<< Updated upstream
-        "SELECT display_title, cwd FROM local_thread_catalog WHERE thread_id = 'thread-from-session';"
-      ]).toString().trim();
-      const state = await fs.readJson(path.join(codexRoot, ".codex-global-state.json"));
-      const persisted = state["electron-persisted-atom-state"] as Record<string, unknown>;
-
-      expect(stateRow).toBe(`Saved session title|${project}|Saved session title`);
-      expect(stateCount).toBe("1");
-      expect(catalogRow).toBe(`Saved session title|${project}`);
-      expect(persisted["electron-saved-workspace-roots"]).toEqual([project]);
-=======
         "SELECT display_title, cwd, source_kind FROM local_thread_catalog WHERE thread_id = 'thread-from-session';"
+      ]).toString().trim();
+      const unindexedRow = execFileSync("sqlite3", [
+        stateDb,
+        "SELECT title, cwd, source, thread_source, history_mode FROM threads WHERE id = 'not-in-index';"
+      ]).toString().trim();
+      const subagentIdRow = execFileSync("sqlite3", [
+        stateDb,
+        "SELECT id FROM threads WHERE id IN ('subagent-thread', 'embedded-parent-thread');"
+      ]).toString().trim();
+      const adoptedRow = execFileSync("sqlite3", [
+        stateDb,
+        "SELECT source, thread_source, title, history_mode FROM threads WHERE id = 'existing-thread';"
       ]).toString().trim();
       const state = await fs.readJson(path.join(codexRoot, ".codex-global-state.json"));
       const persisted = state["electron-persisted-atom-state"] as Record<string, unknown>;
@@ -313,14 +343,63 @@ describe("Codex App project sync", () => {
       const assignments = state["thread-project-assignments"] as Record<string, { projectId: string; projectKind: string }>;
 
       expect(stateRow).toBe(`Saved session title|${project}|Saved session title|cli|ai-relay-import`);
-      expect(stateCount).toBe("1");
+      expect(stateCount).toBe("4");
       expect(catalogRow).toBe(`Saved session title|${project}|cli`);
+      expect(unindexedRow).toBe(`Imported Codex session|${project}|cli|ai-relay-import|paginated`);
+      expect(subagentIdRow).toBe("subagent-thread");
+      expect(adoptedRow).toBe(`vscode|user|App owned title|paginated`);
       expect(persisted["electron-saved-workspace-roots"]).toEqual([project]);
       expect(importedProject).toBeDefined();
       expect(assignments["thread-from-session"]).toMatchObject({ projectKind: "local", projectId: importedProject?.id });
       expect(state["project-order"]).toContain(importedProject?.id);
->>>>>>> Stashed changes
       expect(result).toMatchObject({ addedProjectCount: 1, sqlite: { status: "synced" } });
+    } finally {
+      await fs.remove(dir);
+    }
+  });
+
+  it("keeps projectless threads and their scratch directories out of projects", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "airelay-codex-projectless-"));
+    const home = path.join(dir, "home");
+    const codexRoot = path.join(home, ".codex");
+    const project = path.join(dir, "project");
+    const scratchRoot = path.join(home, "Documents", "Codex");
+    const scratch = path.join(scratchRoot, "2026-07-08", "new-chat");
+    const globalState = path.join(codexRoot, ".codex-global-state.json");
+    const sessions = path.join(codexRoot, "sessions", "2026", "07", "08");
+
+    try {
+      await fs.ensureDir(sessions);
+      await fs.writeJson(globalState, {
+        "electron-persisted-atom-state": {},
+        "projectless-thread-ids": ["scratch-thread"],
+        "thread-workspace-root-hints": { "scratch-thread": scratchRoot },
+        "local-projects": {
+          "local-existing": { name: "project", rootPaths: [project], createdAt: 1, updatedAt: 1 },
+          "local-scratch": { name: "new-chat", rootPaths: [scratch], createdAt: 1, updatedAt: 1 }
+        },
+        "project-order": ["local-existing", "local-scratch"]
+      });
+      await fs.writeJson(path.join(sessions, "project.jsonl"), {
+        type: "session_meta",
+        payload: { id: "project-thread", cwd: project }
+      });
+      await fs.writeJson(path.join(sessions, "scratch.jsonl"), {
+        type: "session_meta",
+        payload: { id: "scratch-thread", cwd: scratch }
+      });
+
+      const result = await syncCodexAppProjects({ homeDir: home, cwd: dir });
+      const state = await fs.readJson(globalState);
+      const persisted = state["electron-persisted-atom-state"] as Record<string, unknown>;
+      const assignments = state["thread-project-assignments"] as Record<string, { projectKind: string; projectId: string }>;
+
+      expect(Object.keys(state["local-projects"] as Record<string, unknown>)).toEqual(["local-existing"]);
+      expect(state["project-order"]).toEqual(["local-existing"]);
+      expect(persisted["electron-saved-workspace-roots"]).toEqual([project]);
+      expect(assignments["project-thread"]).toEqual({ projectKind: "local", projectId: "local-existing" });
+      expect(assignments["scratch-thread"]).toBeUndefined();
+      expect(result).toMatchObject({ addedProjectCount: 1, sqlite: { status: "not-found" } });
     } finally {
       await fs.remove(dir);
     }

@@ -11,6 +11,9 @@ const SAVED_WORKSPACE_ROOTS_KEY = "electron-saved-workspace-roots";
 const PROJECT_ORDER_KEY = "project-order";
 const LOCAL_PROJECTS_KEY = "local-projects";
 const THREAD_PROJECT_ASSIGNMENTS_KEY = "thread-project-assignments";
+const PROJECTLESS_THREAD_IDS_KEY = "projectless-thread-ids";
+const THREAD_WORKSPACE_ROOT_HINTS_KEY = "thread-workspace-root-hints";
+const DEFAULT_PROJECTLESS_ROOT_SEGMENTS = ["Documents", "Codex"];
 const SIDEBAR_PROJECT_KEY_PREFIX = "sidebar-project-expanded-v1-codex:";
 
 interface ExecuteFileResult {
@@ -31,6 +34,7 @@ interface RestoredThread {
   firstUserMessage: string;
   cliVersion?: string;
   gitBranch?: string;
+  historyMode?: string;
 }
 
 interface SqliteColumn {
@@ -39,8 +43,6 @@ interface SqliteColumn {
   defaultValue: string | null;
 }
 
-<<<<<<< Updated upstream
-=======
 interface LocalProject {
   id: string;
   name: string;
@@ -51,11 +53,10 @@ interface LocalProject {
 
 interface ProjectSyncData {
   projects: Record<string, LocalProject>;
-  assignments: Record<string, { projectKind: "local"; projectId: string; pendingCoreUpdate: false }>;
+  assignments: Record<string, { projectKind: string; projectId: string }>;
   order: string[];
 }
 
->>>>>>> Stashed changes
 export interface CodexAppSyncResult {
   addedProjectCount: number;
   sqlite: {
@@ -80,13 +81,16 @@ export async function syncCodexAppProjects(
   const hasSessions = await fs.pathExists(sessionsRoot);
   const indexedThreadNames = await readSessionIndex(path.join(codexRoot, "session_index.jsonl"));
   const restoredThreads = hasSessions ? await collectRestoredThreads(sessionsRoot, indexedThreadNames) : [];
-  const projectRoots = hasSessions ? await collectSessionProjectRoots(sessionsRoot) : [];
+  const state = await readCodexGlobalState(globalStatePath);
+  const projectlessRoots = collectProjectlessRoots(state, env.homeDir);
+  const projectRoots = hasSessions
+    ? (await collectSessionProjectRoots(sessionsRoot)).filter((root) => !isWithinProjectlessRoot(root, projectlessRoots))
+    : [];
   const sqlite = await syncLocalThreadCatalog(codexRoot, sessionsRoot, restoredThreads, executeFile);
   if (projectRoots.length === 0) {
     return { addedProjectCount: 0, sqlite };
   }
 
-  const state = await readCodexGlobalState(globalStatePath);
   const persisted = ensureRecord(state[PERSISTED_STATE_KEY]);
   state[PERSISTED_STATE_KEY] = persisted;
 
@@ -101,7 +105,9 @@ export async function syncCodexAppProjects(
     threads: restoredThreads,
     existingProjects: existingLocalProjects,
     existingAssignments,
-    existingOrder: existingProjectOrder
+    existingOrder: existingProjectOrder,
+    projectlessRoots,
+    projectlessThreadIds: new Set(toStringArray(state[PROJECTLESS_THREAD_IDS_KEY]))
   });
   const projectStateChanged = !sameJson(existingLocalProjects, projectSync.projects)
     || !sameJson(existingAssignments, projectSync.assignments)
@@ -110,7 +116,8 @@ export async function syncCodexAppProjects(
   state[THREAD_PROJECT_ASSIGNMENTS_KEY] = projectSync.assignments;
   state[PROJECT_ORDER_KEY] = projectSync.order;
 
-  const existingSavedRoots = toStringArray(persisted[SAVED_WORKSPACE_ROOTS_KEY]);
+  const existingSavedRoots = toStringArray(persisted[SAVED_WORKSPACE_ROOTS_KEY])
+    .filter((root) => !isWithinProjectlessRoot(root, projectlessRoots));
   const nextSavedRoots = appendUnique(existingSavedRoots, projectRoots);
   const nextProjectOrder = projectSync.order;
   const added = nextSavedRoots.length - existingSavedRoots.length;
@@ -135,27 +142,29 @@ export async function syncCodexAppProjects(
   return { addedProjectCount: added, sqlite };
 }
 
-<<<<<<< Updated upstream
-=======
 function buildProjectSync({
   projectRoots,
   threads,
   existingProjects,
   existingAssignments,
-  existingOrder
+  existingOrder,
+  projectlessRoots,
+  projectlessThreadIds
 }: {
   projectRoots: string[];
   threads: RestoredThread[];
   existingProjects: Record<string, unknown>;
   existingAssignments: Record<string, unknown>;
   existingOrder: string[];
+  projectlessRoots: string[];
+  projectlessThreadIds: Set<string>;
 }): ProjectSyncData {
   const projects: Record<string, LocalProject> = {};
   const projectIdByRoot = new Map<string, string>();
 
   for (const [projectId, value] of Object.entries(existingProjects)) {
     const project = parseLocalProject(projectId, value);
-    if (!project) {
+    if (!project || project.rootPaths.every((rootPath) => isWithinProjectlessRoot(rootPath, projectlessRoots))) {
       continue;
     }
     projects[project.id] = project;
@@ -180,16 +189,51 @@ function buildProjectSync({
     projectIdByRoot.set(rootPath, id);
   }
 
-  const assignments = { ...existingAssignments } as ProjectSyncData["assignments"];
+  const assignments: ProjectSyncData["assignments"] = {};
+  for (const [threadId, value] of Object.entries(existingAssignments)) {
+    const assignment = parseThreadAssignment(value);
+    if (assignment && !projectlessThreadIds.has(threadId) && assignment.projectId in projects) {
+      assignments[threadId] = assignment;
+    }
+  }
   for (const thread of threads) {
+    if (projectlessThreadIds.has(thread.id)) {
+      continue;
+    }
     const projectId = projectIdByRoot.get(thread.cwd);
     if (projectId) {
-      assignments[thread.id] = { projectKind: "local", projectId, pendingCoreUpdate: false };
+      assignments[thread.id] = { projectKind: "local", projectId };
     }
   }
 
   const order = appendUnique(existingOrder.filter((projectId) => projectId in projects), Object.keys(projects));
   return { projects, assignments, order };
+}
+
+function parseThreadAssignment(value: unknown): ProjectSyncData["assignments"][string] | undefined {
+  if (!isRecord(value) || typeof value.projectId !== "string" || typeof value.projectKind !== "string") {
+    return undefined;
+  }
+  return { projectKind: value.projectKind, projectId: value.projectId };
+}
+
+function collectProjectlessRoots(state: Record<string, unknown>, homeDir: string): string[] {
+  const roots = new Set<string>();
+  const hints = ensureRecord(state[THREAD_WORKSPACE_ROOT_HINTS_KEY]);
+  for (const threadId of toStringArray(state[PROJECTLESS_THREAD_IDS_KEY])) {
+    const hint = hints[threadId];
+    if (typeof hint === "string" && hint) {
+      roots.add(hint);
+    }
+  }
+  if (roots.size === 0) {
+    roots.add(path.join(homeDir, ...DEFAULT_PROJECTLESS_ROOT_SEGMENTS));
+  }
+  return [...roots];
+}
+
+function isWithinProjectlessRoot(value: string, projectlessRoots: string[]): boolean {
+  return projectlessRoots.some((root) => value === root || value.startsWith(`${root}${path.sep}`));
 }
 
 function parseLocalProject(projectId: string, value: unknown): LocalProject | undefined {
@@ -213,7 +257,6 @@ function sameJson(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
->>>>>>> Stashed changes
 async function collectRestoredThreads(sessionsRoot: string, indexedThreadNames: Map<string, string>): Promise<RestoredThread[]> {
   const threads = new Map<string, RestoredThread>();
   for (const file of await walkFiles(sessionsRoot)) {
@@ -281,6 +324,7 @@ ATTACH DATABASE '${escapeSqlString(stateDb)}' AS state;
 BEGIN IMMEDIATE;
 ${buildLegacyImportCleanupSql(stateColumns, sessionsRoot)}
 ${buildThreadInsertSql(restoredThreads, stateColumns)}
+${buildHistoryModeRepairSql(restoredThreads, stateColumns)}
 DELETE FROM local_thread_catalog
 WHERE host_id = 'local'
   AND thread_id NOT IN (SELECT id FROM state.threads);
@@ -403,7 +447,9 @@ async function readRestoredThread(file: string, indexedThreadNames: Map<string, 
   let updatedAt: number | undefined;
   let cliVersion: string | undefined;
   let gitBranch: string | undefined;
+  let historyMode: string | undefined;
   let firstUserMessage: string | undefined;
+  let hasSessionMeta = false;
 
   for (const line of content.split("\n")) {
     if (!line.trim()) {
@@ -418,7 +464,8 @@ async function readRestoredThread(file: string, indexedThreadNames: Map<string, 
     if (!isRecord(parsed)) {
       continue;
     }
-    if (parsed.type === "session_meta" && isRecord(parsed.payload)) {
+    if (parsed.type === "session_meta" && isRecord(parsed.payload) && !hasSessionMeta) {
+      hasSessionMeta = true;
       const payload = parsed.payload;
       if (typeof payload.id === "string") {
         id = payload.id;
@@ -431,6 +478,9 @@ async function readRestoredThread(file: string, indexedThreadNames: Map<string, 
       }
       if (isRecord(payload.git) && typeof payload.git.branch === "string") {
         gitBranch = payload.git.branch;
+      }
+      if (typeof payload.history_mode === "string") {
+        historyMode = payload.history_mode;
       }
       const payloadTimestamp = timestampSeconds(payload.timestamp);
       if (payloadTimestamp) {
@@ -447,9 +497,6 @@ async function readRestoredThread(file: string, indexedThreadNames: Map<string, 
     return undefined;
   }
   const indexedTitle = indexedThreadNames.get(id);
-  if (indexedThreadNames.size > 0 && !indexedTitle) {
-    return undefined;
-  }
   const fallback = Math.max(1, Math.floor(stat.mtimeMs / 1000));
   const title = titleFromMessage(indexedTitle ?? firstUserMessage);
   return {
@@ -462,7 +509,8 @@ async function readRestoredThread(file: string, indexedThreadNames: Map<string, 
     preview: title,
     firstUserMessage: firstUserMessage ?? "",
     cliVersion,
-    gitBranch
+    gitBranch,
+    historyMode
   };
 }
 
@@ -568,11 +616,7 @@ function buildLegacyImportCleanupSql(columns: SqliteColumn[], sessionsRoot: stri
   const statements = ["DELETE FROM state.threads WHERE source = 'ai-relay';"];
   if (columns.some((column) => column.name === "thread_source")) {
     statements.push(
-<<<<<<< Updated upstream
-      `DELETE FROM state.threads WHERE source = 'cli' AND thread_source = 'user' AND rollout_path LIKE '${escapeSqlString(`${sessionsRoot}/%`)}';`
-=======
       `DELETE FROM state.threads WHERE source = 'cli' AND thread_source IN ('user', 'ai-relay-import') AND rollout_path LIKE '${escapeSqlString(`${sessionsRoot}/%`)}';`
->>>>>>> Stashed changes
     );
   }
   return statements.join("\n");
@@ -587,11 +631,7 @@ function buildThreadInsertSql(threads: RestoredThread[], columns: SqliteColumn[]
     rollout_path: (thread) => thread.rolloutPath,
     created_at: (thread) => thread.createdAt,
     updated_at: (thread) => thread.updatedAt,
-<<<<<<< Updated upstream
-    source: () => "ai-relay",
-=======
     source: () => "cli",
->>>>>>> Stashed changes
     model_provider: () => "openai",
     cwd: (thread) => thread.cwd,
     title: (thread) => thread.title,
@@ -607,7 +647,7 @@ function buildThreadInsertSql(threads: RestoredThread[], columns: SqliteColumn[]
     thread_source: () => "ai-relay-import",
     recency_at: (thread) => thread.updatedAt,
     recency_at_ms: (thread) => thread.updatedAt * 1000,
-    history_mode: () => "legacy",
+    history_mode: (thread) => thread.historyMode ?? "paginated",
     name: (thread) => thread.title,
     is_pinned: () => 0
   };
@@ -618,6 +658,25 @@ function buildThreadInsertSql(threads: RestoredThread[], columns: SqliteColumn[]
   const insertColumns = columns.map((column) => column.name).filter((column) => column in valuesByColumn);
   const rows = threads.map((thread) => `(${insertColumns.map((column) => sqlValue(valuesByColumn[column]!(thread))).join(", ")})`);
   return `INSERT OR IGNORE INTO state.threads (${insertColumns.join(", ")}) VALUES\n${rows.join(",\n")};`;
+}
+
+function buildHistoryModeRepairSql(threads: RestoredThread[], columns: SqliteColumn[]): string {
+  if (!columns.some((column) => column.name === "history_mode")) {
+    return "";
+  }
+  const expected = threads.filter((thread) => thread.historyMode);
+  if (expected.length === 0) {
+    return "";
+  }
+  const values = expected
+    .map((thread) => `(${sqlValue(thread.id)}, ${sqlValue(thread.historyMode ?? null)})`)
+    .join(",\n");
+  return `WITH expected(id, history_mode) AS (VALUES
+${values}
+)
+UPDATE state.threads SET history_mode = (SELECT history_mode FROM expected WHERE expected.id = state.threads.id)
+WHERE id IN (SELECT id FROM expected)
+  AND COALESCE(history_mode, '') <> (SELECT history_mode FROM expected WHERE expected.id = state.threads.id);`;
 }
 
 function sqlValue(value: string | number | null): string {
